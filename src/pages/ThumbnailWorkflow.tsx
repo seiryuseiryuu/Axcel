@@ -476,15 +476,19 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
   const generateThumbnail = async () => {
     setIsGenerating(true);
     try {
-      const referenceInfo = workflow.selectedReferences.map(t => t.video_title).join(', ');
+      // Collect reference thumbnail URLs
+      const referenceImages = workflow.selectedReferences.map(t => t.thumbnail_url);
       
-      const prompt = `Create a professional YouTube thumbnail.
-References: ${referenceInfo}
-Text to include: "${workflow.text}"
-Style: Bold, eye-catching, high contrast colors, professional design`;
+      // Use the thumbnail text as the main prompt
+      const prompt = workflow.text;
+
+      console.log('Generating with', referenceImages.length, 'reference images');
 
       const { data, error } = await supabase.functions.invoke('generate-image', {
-        body: { prompt },
+        body: { 
+          prompt,
+          referenceImages,
+        },
       });
 
       if (error) throw error;
@@ -502,13 +506,13 @@ Style: Bold, eye-catching, high contrast colors, professional design`;
           title: workflow.text.slice(0, 100),
         });
 
-        toast({ title: '生成完了', description: 'サムネイルが生成されました' });
+        toast({ title: '生成完了', description: '参考サムネイルを元にサムネイルが生成されました' });
         
         // Update guidance after generation
         setAiGuidance({
           step: 4,
           title: 'サムネイルが完成しました！',
-          content: '素晴らしいサムネイルができました！気に入った場合は次のステップでA/Bテスト用のバリエーションを作成しましょう。別のデザインを試したい場合は、再度生成ボタンを押してください。',
+          content: '参考サムネイルのスタイルを元に新しいサムネイルが生成されました！気に入った場合は次のステップでA/Bテスト用のバリエーションを作成しましょう。',
           suggestions: [
             'A/Bテストへ進む',
             '別パターンを生成',
