@@ -659,33 +659,56 @@ JSON形式で回答:
       const selectedModel = workflow.selectedModelIndex !== null ? workflow.modelImages[workflow.selectedModelIndex] : null;
       const pattern = workflow.patternAnalysis;
 
+      // 素材がアップロードされているか確認
+      const hasMaterials = workflow.materials.length > 0;
+      const hasText = workflow.text.trim().length > 0;
+
       // 選択されたモデルのパターン情報を使用
       const patternInfo = selectedModel ? `【選択パターン: ${selectedModel.patternName}】
 ${selectedModel.description}` : '';
 
+      // 素材指定がない場合はモデル画像の人物をそのまま使用
+      const preserveModelElements = !hasMaterials ? `
+【人物・要素の保持 - 最重要】
+- モデル画像に含まれる人物・キャラクターはそのまま維持すること
+- 人物の顔、表情、ポーズ、服装を変更しないこと
+- 新しい人物を追加しないこと
+- 人物を削除しないこと` : '';
+
+      const textInstruction = hasText ? `- 文言「${workflow.text}」を配置` : '- 文言は指定されていないため、文字を追加しないこと';
+
       const prompt = `YouTubeサムネイルを生成。
 
-【サムネイル文言】${workflow.text}
+${hasText ? `【サムネイル文言】${workflow.text}` : '【文言なし】'}
 
 ${patternInfo}
+${preserveModelElements}
 
 ${pattern?.summary ? `【パターン分析サマリー】${pattern.summary}` : ''}
 
 【重要ルール - 厳守】
 - アスペクト比: 16:9（1280x720）
-- 文言「${workflow.text}」を配置
+${textInstruction}
 - 選択パターンの構図・配置・デザインを完全に忠実に再現すること
 - モデル画像にない要素（人物・文字・オブジェクト）を追加しないこと
 - モデル画像の構図・レイアウトを変更しないこと
-- タイトル文字は含めない（サムネイル文言のみ配置）`;
+- タイトル文字は含めない（サムネイル文言のみ配置）
+- 指定がない限り、モデル画像の人物・背景・構図をそのまま引き継ぐこと`;
+
+      // モデル画像を参照画像として追加（最優先）
+      const referenceImages = selectedModel 
+        ? [selectedModel.imageUrl, ...ownChannelRefs.map(t => t.thumbnail_url), ...competitorRefs.map(t => t.thumbnail_url)]
+        : [...ownChannelRefs, ...competitorRefs].map(t => t.thumbnail_url);
 
       const { data, error } = await supabase.functions.invoke('generate-image', {
         body: { 
           prompt,
-          referenceImages: [...ownChannelRefs, ...competitorRefs].map(t => t.thumbnail_url),
-          assetCount: 0,
+          referenceImages,
+          modelImage: selectedModel?.imageUrl, // モデル画像を明示的に渡す
+          assetCount: workflow.materials.length,
           ownChannelCount: ownChannelRefs.length,
           competitorCount: competitorRefs.length,
+          preserveModelPerson: !hasMaterials, // 素材がない場合は人物保持フラグ
         },
       });
 
