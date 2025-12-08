@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, referenceImages } = await req.json();
+    const { prompt, referenceImages, ownChannelCount = 0 } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
     if (!LOVABLE_API_KEY) {
@@ -27,7 +27,7 @@ serve(async (req) => {
 
     // Add reference images first if provided
     if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-      console.log(`Including ${referenceImages.length} reference images`);
+      console.log(`Including ${referenceImages.length} reference images (own channel: ${ownChannelCount})`);
       
       for (const imageUrl of referenceImages) {
         if (imageUrl && typeof imageUrl === 'string') {
@@ -41,18 +41,29 @@ serve(async (req) => {
       }
     }
 
-    // Create detailed prompt for YouTube thumbnail generation
-    const enhancedPrompt = referenceImages && referenceImages.length > 0
-      ? `You are a professional YouTube thumbnail designer. Study the reference thumbnails provided carefully - analyze their composition, color schemes, text placement, and visual style.
+    // Create detailed prompt for YouTube thumbnail generation with person consistency
+    const personConsistencyNote = ownChannelCount > 0
+      ? `
+CRITICAL - Person Consistency:
+- The first ${ownChannelCount} reference image(s) are from the creator's own channel
+- You MUST use the SAME PERSON who appears in these own-channel references
+- Match their: face shape, facial features, hair style, skin tone, and overall appearance
+- This person is the main character of the channel - they must look identical across all thumbnails
+- Study the person's expression style and body language from the references
+`
+      : '';
 
+    const enhancedPrompt = referenceImages && referenceImages.length > 0
+      ? `You are a professional YouTube thumbnail designer. Study the reference thumbnails provided carefully.
+${personConsistencyNote}
 Based on these references, create a NEW YouTube thumbnail with these specifications:
 - Aspect ratio: 16:9 (1280x720)
-- Text to display: "${prompt}"
+- Main content: ${prompt}
 - Style: Match the visual style, energy, and color palette of the reference thumbnails
 - Make it eye-catching, high contrast, and professional
 - Incorporate similar design elements (text effects, overlays, color gradients) from the references
 
-Important: Create an original thumbnail inspired by the references, don't copy them exactly.`
+Important: Create an original thumbnail inspired by the references. The person should look exactly like they do in the own-channel references.`
       : `Create a professional YouTube thumbnail image in 16:9 aspect ratio (1280x720). ${prompt}. 
 Style: High contrast, vibrant colors, eye-catching design suitable for YouTube. 
 Make it visually striking and attention-grabbing. Wide landscape format.`;
@@ -64,7 +75,7 @@ Make it visually striking and attention-grabbing. Wide landscape format.`;
     });
 
     console.log('Generating image with', referenceImages?.length || 0, 'reference images');
-    console.log('Prompt:', enhancedPrompt.substring(0, 200) + '...');
+    console.log('Prompt preview:', enhancedPrompt.substring(0, 300) + '...');
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',

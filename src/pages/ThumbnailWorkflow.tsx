@@ -105,6 +105,8 @@ export default function ThumbnailWorkflow() {
   const [textSuggestions, setTextSuggestions] = useState<TextSuggestion[]>([]);
   const [materialSuggestions, setMaterialSuggestions] = useState<MaterialSuggestion[]>([]);
   const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
+  const [suggestedReferences, setSuggestedReferences] = useState<ChannelThumbnail[]>([]);
+  const [isLoadingSuggestedRefs, setIsLoadingSuggestedRefs] = useState(false);
 
   const [aiGuidance, setAiGuidance] = useState<AIGuidance | null>(null);
 
@@ -195,6 +197,61 @@ export default function ThumbnailWorkflow() {
       }
       return prev;
     });
+  };
+
+  // Find similar thumbnails based on video title using AI
+  const findSimilarThumbnails = async (title: string, description: string) => {
+    if (thumbnails.length === 0) return;
+    
+    setIsLoadingSuggestedRefs(true);
+    try {
+      const thumbnailList = thumbnails.map(t => ({
+        id: t.id,
+        title: t.video_title,
+        channelType: t.channel_type,
+      }));
+
+      const { data, error } = await supabase.functions.invoke('chat', {
+        body: {
+          messages: [{
+            role: 'user',
+            content: `あなたはYouTubeコンテンツの専門家です。以下の動画タイトルに最も類似したサムネイルを選んでください。
+
+新しい動画タイトル: 「${title}」
+${description ? `動画内容: ${description}` : ''}
+
+利用可能なサムネイル一覧:
+${thumbnailList.map((t, i) => `${i + 1}. ID:${t.id} 「${t.title}」 (${t.channelType === 'own' ? '自チャンネル' : '競合'})`).join('\n')}
+
+ルール:
+1. 類似度の高い順に最大5つのIDを選んでください
+2. 自チャンネルを優先してください（登場人物の一貫性のため）
+3. 類似の企画、テーマ、雰囲気の動画を選んでください
+
+以下のJSON形式で回答:
+{"recommendedIds": ["id1", "id2", "id3"]}`
+          }],
+        },
+      });
+
+      if (error) throw error;
+
+      try {
+        const jsonMatch = data.content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const recommendedIds = parsed.recommendedIds || [];
+          const suggested = thumbnails.filter(t => recommendedIds.includes(t.id));
+          setSuggestedReferences(suggested);
+        }
+      } catch (parseError) {
+        console.error('Parse error:', parseError);
+      }
+    } catch (error) {
+      console.error('Similar thumbnail search error:', error);
+    } finally {
+      setIsLoadingSuggestedRefs(false);
+    }
   };
 
   const analyzeAndProceedToStep2 = async () => {
@@ -491,23 +548,33 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
   const generateThumbnail = async () => {
     setIsGenerating(true);
     try {
-      // Collect reference thumbnail URLs
-      const referenceImages = workflow.selectedReferences.map(t => t.thumbnail_url);
+      // Collect reference thumbnail URLs, prioritizing own channel for person consistency
+      const ownChannelRefs = workflow.selectedReferences.filter(t => t.channel_type === 'own');
+      const competitorRefs = workflow.selectedReferences.filter(t => t.channel_type !== 'own');
       
-      // Build prompt with video title and description
+      // Own channel refs first for better person recognition
+      const referenceImages = [...ownChannelRefs, ...competitorRefs].map(t => t.thumbnail_url);
+      
+      // Build prompt with video title, description, and person info
       const materialDescText = workflow.materials.length > 0 
         ? `\n使用素材: ${workflow.materials.map(m => m.description || '素材').join('、')}`
         : '';
       
-      const prompt = `動画タイトル「${workflow.videoTitle}」のサムネイル。
-文言: ${workflow.text}${workflow.videoDescription ? `\n動画内容: ${workflow.videoDescription}` : ''}${materialDescText}`;
+      // Include info about own channel references for person consistency
+      const personInfo = ownChannelRefs.length > 0
+        ? `\n登場人物: 参考サムネイル（自チャンネル${ownChannelRefs.length}枚）に登場する人物と同じ人物を使用してください。顔の特徴、髪型、雰囲気を一致させてください。`
+        : '';
+      
+      const prompt = `動画タイトル「${workflow.videoTitle}」のYouTubeサムネイル。
+文言: ${workflow.text}${workflow.videoDescription ? `\n動画内容: ${workflow.videoDescription}` : ''}${personInfo}${materialDescText}`;
 
-      console.log('Generating with', referenceImages.length, 'reference images');
+      console.log('Generating with', referenceImages.length, 'reference images (own:', ownChannelRefs.length, ')');
 
       const { data, error } = await supabase.functions.invoke('generate-image', {
         body: { 
           prompt,
           referenceImages,
+          ownChannelCount: ownChannelRefs.length,
         },
       });
 
@@ -689,19 +756,20 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
 
                   <div className="flex items-center justify-end pt-4 border-t border-border">
                     <Button
-                      onClick={() => {
+                      onClick={async () => {
                         if (!workflow.videoTitle.trim()) {
                           toast({ title: 'タイトルを入力', description: '動画タイトルを入力してください', variant: 'destructive' });
                           return;
                         }
+                        // Find similar thumbnails based on title
+                        await findSimilarThumbnails(workflow.videoTitle, workflow.videoDescription);
                         setAiGuidance({
                           step: 2,
                           title: '参考サムネイルを選びましょう',
-                          content: '効果的なサムネイルを作るには、成功している参考事例を分析することが重要です。',
+                          content: 'AIがタイトルから類似の動画を提案しました。自チャンネルのサムネイルを選ぶと、登場人物の一貫性を保てます。',
                           suggestions: [
-                            '自チャンネルから2〜3枚選ぶ',
-                            '競合チャンネルから1〜2枚選ぶ',
-                            '似たジャンルの人気動画を参考にする',
+                            '自チャンネルから2〜3枚選ぶ（登場人物用）',
+                            '競合チャンネルから1〜2枚選ぶ（スタイル参考用）',
                           ],
                         });
                         setWorkflow(prev => ({ ...prev, step: 2 }));
@@ -730,6 +798,56 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* AI Suggested References */}
+                  {suggestedReferences.length > 0 && (
+                    <div className="space-y-3 p-4 bg-primary/5 rounded-lg border border-primary/20">
+                      <h4 className="text-sm font-semibold flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-primary" />
+                        AIのおすすめ（タイトルに類似）
+                      </h4>
+                      <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+                        {suggestedReferences.map(thumb => (
+                          <div
+                            key={thumb.id}
+                            onClick={() => toggleReferenceSelection(thumb)}
+                            className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                              workflow.selectedReferences.some(t => t.id === thumb.id)
+                                ? 'border-primary ring-2 ring-primary/30'
+                                : 'border-primary/30 hover:border-primary/50'
+                            }`}
+                          >
+                            <img
+                              src={thumb.thumbnail_url}
+                              alt={thumb.video_title}
+                              className="aspect-video object-cover w-full"
+                            />
+                            {workflow.selectedReferences.some(t => t.id === thumb.id) && (
+                              <div className="absolute top-1 right-1 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
+                                <Check className="w-3 h-3 text-primary-foreground" />
+                              </div>
+                            )}
+                            <Badge 
+                              variant="secondary" 
+                              className="absolute bottom-1 left-1 text-[10px] px-1 py-0"
+                            >
+                              {thumb.channel_type === 'own' ? '自' : '競合'}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        自チャンネルから選ぶと、登場人物の一貫性を保てます
+                      </p>
+                    </div>
+                  )}
+
+                  {isLoadingSuggestedRefs && (
+                    <div className="flex items-center justify-center py-4 bg-primary/5 rounded-lg border border-primary/20">
+                      <Loader2 className="w-5 h-5 animate-spin mr-2 text-primary" />
+                      <span className="text-sm text-muted-foreground">類似サムネイルを検索中...</span>
+                    </div>
+                  )}
+
                   {/* Fetch buttons */}
                   <div className="flex flex-wrap gap-2">
                     {channels.map(channel => (
