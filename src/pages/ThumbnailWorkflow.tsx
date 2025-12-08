@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -55,14 +55,22 @@ interface MaterialItem {
   description: string;
 }
 
-interface PatternAnalysis {
-  textPosition: string;
-  colorScheme: string;
-  personPosition: string;
-  layout: string;
-  effects: string;
-  commonElements?: string;
-  uniqueStyle?: string;
+interface PatternCategory {
+  name: string;
+  description: string;
+  characteristics: {
+    textPosition: string;
+    colorScheme: string;
+    personPosition: string;
+    layout: string;
+    effects: string;
+  };
+  exampleThumbnails: string[]; // URLs of thumbnails that match this pattern
+}
+
+interface PatternAnalysisResult {
+  patterns: PatternCategory[];
+  summary: string;
 }
 
 interface MaterialSuggestion {
@@ -78,6 +86,7 @@ interface TextSuggestionItem {
 
 interface ModelImageInfo {
   imageUrl: string;
+  patternName: string;
   description: string;
   requiredMaterials: MaterialSuggestion[];
   suggestedTexts: TextSuggestionItem[];
@@ -91,7 +100,7 @@ interface WorkflowState {
   text: string;
   materials: MaterialItem[];
   generatedImages: string[];
-  patternAnalysis: PatternAnalysis | null;
+  patternAnalysis: PatternAnalysisResult | null;
   modelImages: ModelImageInfo[];
   selectedModelIndex: number | null;
 }
@@ -149,6 +158,27 @@ export default function ThumbnailWorkflow() {
     modelImages: [],
     selectedModelIndex: null,
   });
+
+  // 前回のステップを記録して自動生成をトリガー
+  const prevStepRef = useRef<number>(1);
+
+  // Step 4に移動したとき、モデル画像がなければ自動生成
+  useEffect(() => {
+    if (workflow.step === 4 && prevStepRef.current !== 4 && workflow.patternAnalysis && workflow.modelImages.length === 0 && !isGeneratingModels) {
+      generateModelImagesRef.current?.();
+    }
+    prevStepRef.current = workflow.step;
+  }, [workflow.step, workflow.patternAnalysis, workflow.modelImages.length, isGeneratingModels]);
+
+  // Step 6に移動したとき、まだ画像が生成されていなければ自動生成
+  useEffect(() => {
+    if (workflow.step === 6 && prevStepRef.current !== 6 && workflow.generatedImages.length === 0 && workflow.text && !isGenerating) {
+      generateThumbnailRef.current?.();
+    }
+  }, [workflow.step, workflow.generatedImages.length, workflow.text, isGenerating]);
+
+  const generateModelImagesRef = useRef<() => Promise<void>>();
+  const generateThumbnailRef = useRef<() => Promise<void>>();
 
   const addCompetitorChannel = () => {
     const newId = `competitor-${competitorChannels.length}`;
@@ -288,58 +318,44 @@ export default function ThumbnailWorkflow() {
       const thumbnailUrls = workflow.selectedReferences.map(t => t.thumbnail_url);
       const thumbnailTitles = workflow.selectedReferences.map(t => t.video_title).filter(Boolean);
       
-      // 画像を直接分析するためにimageUrlsパラメータを使用
+      // パターンを複数に分類して分析
       const { data, error } = await supabase.functions.invoke('chat', {
         body: {
           messages: [{
             role: 'user',
-            content: `これらの${workflow.selectedReferences.length}枚のYouTubeサムネイル画像を詳細に視覚分析してください。
+            content: `これらの${workflow.selectedReferences.length}枚のYouTubeサムネイル画像を分析し、2〜3種類のパターンに分類してください。
 
 【動画タイトル参考】
 ${thumbnailTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
-【分析項目】各サムネイルを実際に見て、以下を具体的に分析：
+【分析指示】
+サムネイルを視覚的特徴で分類し、各パターンの特徴を抽出してください。
 
-1. **テロップ・文字の配置**: 
-   - 文字の位置（左上/右上/中央/下部など）
-   - フォントサイズ（大/中/小）
-   - 文字の色と縁取り
-   - 文字数と行数
-
-2. **配色パターン**:
-   - 背景の主な色
-   - アクセントカラー
-   - 全体のトーン（明るい/暗い/ビビッド）
-   - グラデーションの有無と方向
-
-3. **人物の配置**:
-   - 人物の位置（左/右/中央）
-   - 顔の大きさ（画面に占める割合）
-   - 表情パターン（驚き/笑顔/真剣など）
-   - 人物の切り抜き方
-
-4. **レイアウト構成**:
-   - 全体の構図（1:1分割/3分割/中央集中など）
-   - 余白の使い方
-   - 視線誘導の流れ
-   - 情報の優先順位
-
-5. **視覚効果**:
-   - 使われているエフェクト（光/影/ブラー）
-   - アイコンや装飾要素
-   - 枠線やフレーム
-   - 矢印や強調マーク
-
-以下のJSON形式で詳細に回答してください:
+以下のJSON形式で回答:
 {
-  "textPosition": "具体的な位置と配置パターン（例：右上に大きく3文字、白文字に黒縁取り）",
-  "colorScheme": "具体的な配色（例：背景は暗めの青グラデーション、アクセントに黄色）",
-  "personPosition": "具体的な人物配置（例：左1/3に顔のアップ、驚いた表情、切り抜き配置）",
-  "layout": "具体的なレイアウト（例：左に人物、右にテキスト、背景は対角線グラデーション）",
-  "effects": "具体的な効果（例：人物に白い縁取り、背景に放射状の光線エフェクト）",
-  "commonElements": "共通して使われている要素リスト",
-  "uniqueStyle": "このチャンネル特有のスタイル特徴"
-}`
+  "patterns": [
+    {
+      "name": "パターンA（具体的な名前）",
+      "description": "このパターンの特徴を30文字以内で",
+      "characteristics": {
+        "textPosition": "テロップの位置・サイズ・色",
+        "colorScheme": "配色・トーン",
+        "personPosition": "人物配置・表情",
+        "layout": "全体構図",
+        "effects": "視覚効果"
+      }
+    },
+    {
+      "name": "パターンB",
+      "description": "...",
+      "characteristics": {...}
+    }
+  ],
+  "summary": "全体の傾向まとめ（50文字以内）"
+}
+
+※必ず2〜3パターンに分類
+※各パターンの特徴は具体的かつ簡潔に`
           }],
           imageUrls: thumbnailUrls,
         },
@@ -351,7 +367,7 @@ ${thumbnailTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         setWorkflow(prev => ({ ...prev, patternAnalysis: parsed }));
-        toast({ title: '分析完了', description: '画像パターンを詳細に分析しました' });
+        toast({ title: '分析完了', description: `${parsed.patterns?.length || 0}パターンを検出しました` });
       }
     } catch (error) {
       console.error('Analysis error:', error);
@@ -361,27 +377,22 @@ ${thumbnailTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
     }
   };
 
+  
   const generateModelImages = async () => {
-    if (!workflow.patternAnalysis) return;
+    if (!workflow.patternAnalysis || !workflow.patternAnalysis.patterns) return;
 
     setIsGeneratingModels(true);
     setWorkflow(prev => ({ ...prev, modelImages: [], selectedModelIndex: null }));
     
     try {
-      const pattern = workflow.patternAnalysis;
+      const patterns = workflow.patternAnalysis.patterns;
       const ownChannelRefs = workflow.selectedReferences.filter(t => t.channel_type === 'own');
       const competitorRefs = workflow.selectedReferences.filter(t => t.channel_type !== 'own');
       const referenceImages = [...ownChannelRefs, ...competitorRefs].map(t => t.thumbnail_url);
       const referenceTitles = workflow.selectedReferences.map(t => t.video_title).filter(Boolean).slice(0, 5);
       
-      const modelVariations = [
-        { name: 'スタンダード', emphasis: '基本パターンに忠実' },
-        { name: 'インパクト重視', emphasis: '視覚的インパクトを強調' },
-        { name: 'シンプル', emphasis: 'すっきりとした構成' },
-      ];
-
-      const modelPromises = modelVariations.map(async (variation) => {
-        // 動画タイトル・内容・参考動画をプロンプトに組み込む
+      // 各パターンに対してモデル画像を生成
+      const modelPromises = patterns.map(async (pattern: PatternCategory) => {
         const prompt = `YouTubeサムネイルのモデル画像を生成。
 
 【動画情報】
@@ -391,20 +402,18 @@ ${workflow.videoDescription ? `内容: ${workflow.videoDescription}` : ''}
 【参考動画タイトル】
 ${referenceTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
-【パターン分析結果】
-- テロップ配置: ${pattern.textPosition}
-- 配色: ${pattern.colorScheme}
-- 人物配置: ${pattern.personPosition}
-- レイアウト: ${pattern.layout}
-- 効果: ${pattern.effects}
-
-【バリエーション】${variation.name} - ${variation.emphasis}
+【このパターンの特徴: ${pattern.name}】
+${pattern.description}
+- テロップ配置: ${pattern.characteristics.textPosition}
+- 配色: ${pattern.characteristics.colorScheme}
+- 人物配置: ${pattern.characteristics.personPosition}
+- レイアウト: ${pattern.characteristics.layout}
+- 効果: ${pattern.characteristics.effects}
 
 【生成ルール】
 - アスペクト比: 16:9（1280x720）
-- テロップはタイトル・内容から最もインパクトのある2〜6文字を使用
-- 人物配置は分析結果に従う
-- ダミーではなく、実際の動画内容を反映させる`;
+- 上記パターンの特徴を忠実に再現
+- テロップはタイトルから2〜6文字を使用`;
 
         const { data, error } = await supabase.functions.invoke('generate-image', {
           body: { 
@@ -418,34 +427,28 @@ ${referenceTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
         if (error) throw error;
 
-        // 生成されたモデル画像から必要素材・文言を複数提案
+        // 必要素材・文言を提案
         const { data: descData } = await supabase.functions.invoke('chat', {
           body: {
             messages: [{ 
               role: 'user', 
-              content: `動画タイトル「${workflow.videoTitle}」${workflow.videoDescription ? `（内容: ${workflow.videoDescription}）` : ''}のサムネイルモデルを分析してください。
+              content: `動画タイトル「${workflow.videoTitle}」のサムネイル（${pattern.name}パターン）の必要素材と文言を提案。
 
 以下のJSON形式で回答:
 {
-  "description": "このモデルの構造説明（50文字以内）",
+  "description": "${pattern.description}",
   "requiredMaterials": [
-    {"name": "素材名", "description": "具体的な説明", "priority": "high"},
-    {"name": "素材名2", "description": "具体的な説明", "priority": "medium"}
+    {"name": "素材名", "description": "説明", "priority": "high"}
   ],
   "suggestedTexts": [
-    {"text": "文言1（2〜6文字）", "reason": "選んだ理由"},
-    {"text": "文言2（2〜6文字）", "reason": "選んだ理由"},
-    {"text": "文言3（2〜6文字）", "reason": "選んだ理由"}
+    {"text": "文言（2〜6文字）", "reason": "理由"}
   ]
-}
-
-※必要素材は本当に必要なもののみ（優先度: high/medium/low）
-※文言は3つ以上提案` 
+}` 
             }],
           },
         });
 
-        let description = `${variation.name}: ${variation.emphasis}`;
+        let description = pattern.description;
         let requiredMaterials: MaterialSuggestion[] = [];
         let suggestedTexts: TextSuggestionItem[] = [];
 
@@ -461,12 +464,18 @@ ${referenceTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
           } catch {}
         }
 
-        return { imageUrl: data.imageUrl, description, requiredMaterials, suggestedTexts };
+        return { 
+          imageUrl: data.imageUrl, 
+          patternName: pattern.name,
+          description, 
+          requiredMaterials, 
+          suggestedTexts 
+        };
       });
 
       const results = await Promise.all(modelPromises);
       setWorkflow(prev => ({ ...prev, modelImages: results.filter(r => r.imageUrl) }));
-      toast({ title: '生成完了', description: 'モデル画像を3枚生成しました' });
+      toast({ title: '生成完了', description: `${results.length}パターンのモデル画像を生成しました` });
     } catch (error) {
       console.error('Model generation error:', error);
       toast({ title: 'エラー', description: 'モデル画像の生成に失敗しました', variant: 'destructive' });
@@ -475,13 +484,14 @@ ${referenceTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
     }
   };
 
-  // モデル修正フィードバックで再生成
+  // ref に関数を割り当て
+  generateModelImagesRef.current = generateModelImages;
   const regenerateModelWithFeedback = async () => {
     if (!modelFeedback.trim() || workflow.selectedModelIndex === null) return;
     
     setIsRegeneratingModel(true);
     try {
-      const pattern = workflow.patternAnalysis;
+      const selectedModel = workflow.modelImages[workflow.selectedModelIndex];
       const ownChannelRefs = workflow.selectedReferences.filter(t => t.channel_type === 'own');
       const competitorRefs = workflow.selectedReferences.filter(t => t.channel_type !== 'own');
       const referenceImages = [...ownChannelRefs, ...competitorRefs].map(t => t.thumbnail_url);
@@ -499,15 +509,11 @@ ${workflow.videoDescription ? `内容: ${workflow.videoDescription}` : ''}
 【参考動画タイトル】
 ${referenceTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
-【パターン分析結果（必ず踏襲）】
-- テロップ配置: ${pattern?.textPosition || ''}
-- 配色: ${pattern?.colorScheme || ''}
-- 人物配置: ${pattern?.personPosition || ''}
-- レイアウト: ${pattern?.layout || ''}
-- 効果: ${pattern?.effects || ''}
+【元のパターン: ${selectedModel.patternName}】
+${selectedModel.description}
 
 【生成ルール】
-- 修正指示を反映しつつ、パターン分析の構図を踏襲
+- 修正指示を反映
 - アスペクト比: 16:9（1280x720）`;
 
       const { data, error } = await supabase.functions.invoke('generate-image', {
@@ -554,7 +560,13 @@ JSON形式で回答:
         } catch {}
       }
 
-      const newModel: ModelImageInfo = { imageUrl: data.imageUrl, description, requiredMaterials, suggestedTexts };
+      const newModel: ModelImageInfo = { 
+        imageUrl: data.imageUrl, 
+        patternName: selectedModel.patternName + '（修正）',
+        description, 
+        requiredMaterials, 
+        suggestedTexts 
+      };
       
       setWorkflow(prev => {
         const newImages = [...prev.modelImages];
@@ -629,6 +641,10 @@ JSON形式で回答:
       const referenceTitles = workflow.selectedReferences.map(t => t.video_title).filter(Boolean).slice(0, 5);
       const pattern = workflow.patternAnalysis;
 
+      // 選択されたモデルのパターン情報を使用
+      const patternInfo = selectedModel ? `【選択パターン: ${selectedModel.patternName}】
+${selectedModel.description}` : '';
+
       const prompt = `YouTubeサムネイルを生成。
 
 【動画情報】
@@ -640,20 +656,14 @@ ${workflow.videoDescription ? `内容: ${workflow.videoDescription}` : ''}
 【参考動画タイトル】
 ${referenceTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}
 
-${pattern ? `【パターン分析（これに従って生成）】
-- テロップ配置: ${pattern.textPosition}
-- 配色: ${pattern.colorScheme}
-- 人物配置: ${pattern.personPosition}
-- レイアウト: ${pattern.layout}
-- 効果: ${pattern.effects}` : ''}
+${patternInfo}
 
-${selectedModel ? `【選択モデル】${selectedModel.description}` : ''}
+${pattern?.summary ? `【パターン分析サマリー】${pattern.summary}` : ''}
 
 【生成ルール】
 - アスペクト比: 16:9（1280x720）
-- 文言「${workflow.text}」をテロップ配置パターンに従って配置
-- 人物配置パターンに従って人物を配置
-- 効果・配色パターンを適用`;
+- 文言「${workflow.text}」を配置
+- 選択パターンの構図に従う`;
 
       const { data, error } = await supabase.functions.invoke('generate-image', {
         body: { 
@@ -684,6 +694,9 @@ ${selectedModel ? `【選択モデル】${selectedModel.description}` : ''}
       setIsGenerating(false);
     }
   };
+
+  // ref に関数を割り当て
+  generateThumbnailRef.current = generateThumbnail;
 
   const refineImage = async (imageUrl: string) => {
     if (!refinementInstruction.trim()) return;
@@ -1057,30 +1070,26 @@ ${selectedModel ? `【選択モデル】${selectedModel.description}` : ''}
                   <div className="p-4 bg-primary/5 rounded-lg border border-primary/20 space-y-3">
                     <h4 className="font-semibold flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-primary" />
-                      分析結果
+                      分析結果: {workflow.patternAnalysis.patterns?.length || 0}パターン検出
                     </h4>
                     
-                    <div className="space-y-2 text-sm">
-                      <div className="flex gap-2">
-                        <span className="text-muted-foreground w-20 shrink-0">テロップ:</span>
-                        <span>{typeof workflow.patternAnalysis.textPosition === 'string' ? workflow.patternAnalysis.textPosition : '-'}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="text-muted-foreground w-20 shrink-0">配色:</span>
-                        <span>{typeof workflow.patternAnalysis.colorScheme === 'string' ? workflow.patternAnalysis.colorScheme : '-'}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="text-muted-foreground w-20 shrink-0">人物:</span>
-                        <span>{typeof workflow.patternAnalysis.personPosition === 'string' ? workflow.patternAnalysis.personPosition : '-'}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="text-muted-foreground w-20 shrink-0">レイアウト:</span>
-                        <span>{typeof workflow.patternAnalysis.layout === 'string' ? workflow.patternAnalysis.layout : '-'}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="text-muted-foreground w-20 shrink-0">効果:</span>
-                        <span>{typeof workflow.patternAnalysis.effects === 'string' ? workflow.patternAnalysis.effects : '-'}</span>
-                      </div>
+                    {workflow.patternAnalysis.summary && (
+                      <p className="text-sm text-muted-foreground">{workflow.patternAnalysis.summary}</p>
+                    )}
+                    
+                    <div className="space-y-3">
+                      {workflow.patternAnalysis.patterns?.map((pattern, idx) => (
+                        <div key={idx} className="p-3 bg-background/50 rounded-lg border border-border/50">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Badge variant="outline">{pattern.name}</Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground mb-2">{pattern.description}</p>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div><span className="text-muted-foreground">配置:</span> {pattern.characteristics.layout}</div>
+                            <div><span className="text-muted-foreground">配色:</span> {pattern.characteristics.colorScheme}</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1319,7 +1328,7 @@ ${selectedModel ? `【選択モデル】${selectedModel.description}` : ''}
                   <p><span className="font-medium">タイトル:</span> {workflow.videoTitle}</p>
                   <p><span className="font-medium">文言:</span> {workflow.text}</p>
                   <p><span className="font-medium">参考:</span> {workflow.selectedReferences.length}枚</p>
-                  {workflow.patternAnalysis && <p><span className="font-medium">パターン:</span> {workflow.patternAnalysis.layout}</p>}
+                  {selectedModel && <p><span className="font-medium">パターン:</span> {selectedModel.patternName}</p>}
                 </div>
 
                 <Button onClick={generateThumbnail} disabled={isGenerating} className="w-full gradient-primary glow-sm h-12 text-lg">
