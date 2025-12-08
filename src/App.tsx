@@ -7,7 +7,6 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
-import Chat from "./pages/Chat";
 import Gallery from "./pages/Gallery";
 import Channels from "./pages/Channels";
 import ThumbnailWorkflow from "./pages/ThumbnailWorkflow";
@@ -29,14 +28,6 @@ const App = () => (
               element={
                 <AppLayout>
                   <Dashboard />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/chat"
-              element={
-                <AppLayout>
-                  <Chat />
                 </AppLayout>
               }
             />
