@@ -48,12 +48,14 @@ interface MaterialItem {
   id: string;
   file: File;
   preview: string;
+  description: string;
 }
 
 interface WorkflowState {
   step: number;
   selectedReferences: ChannelThumbnail[];
   videoTitle: string;
+  videoDescription: string;
   text: string;
   materials: MaterialItem[];
   generatedImages: string[];
@@ -93,6 +95,7 @@ export default function ThumbnailWorkflow() {
     step: 1,
     selectedReferences: [],
     videoTitle: '',
+    videoDescription: '',
     text: '',
     materials: [],
     generatedImages: [],
@@ -283,31 +286,26 @@ ${referenceInfo.map((r, i) => `${i + 1}. "${r.title}" (${r.channelType})`).join(
             content: `あなたはYouTubeサムネイルの専門家です。以下の動画タイトルから、効果的なサムネイル文言と必要な素材を提案してください。
 
 動画タイトル: 「${workflow.videoTitle}」
+${workflow.videoDescription ? `動画内容: ${workflow.videoDescription}` : ''}
 
 ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i) => `${i + 1}. "${r.title}" (${r.channelType})`).join('\n')}\n` : ''}
 
 以下のJSON形式で回答してください（必ずこの形式で）:
 {
   "textSuggestions": [
-    {"text": "サムネイル文言1", "reason": "この文言が効果的な理由"},
-    {"text": "サムネイル文言2", "reason": "この文言が効果的な理由"},
-    {"text": "サムネイル文言3", "reason": "この文言が効果的な理由"}
+    {"text": "サムネイル文言1", "reason": "理由"},
+    {"text": "サムネイル文言2", "reason": "理由"},
+    {"text": "サムネイル文言3", "reason": "理由"}
   ],
   "materialSuggestions": [
-    {"type": "人物写真", "description": "必要な表情や構図", "examples": ["例1", "例2"]},
-    {"type": "背景・装飾", "description": "推奨する背景や装飾", "examples": ["例1", "例2"]}
-  ],
-  "tips": "その他のアドバイス"
+    {"type": "素材", "description": "AIでは生成が難しい素材の説明", "examples": []}
+  ]
 }
 
-サムネイル文言は4〜8文字程度で、インパクトのある短いキーワードにしてください。例：「衝撃」「神回」「最強」「禁断」など。
-
-素材提案では、直接的な物体ではなく「表情」や「雰囲気」で提案してください。
-例：
-- 灼熱風呂の企画 → 「苦悶の表情」「限界を超えた顔」
-- 副業・稼ぐ系 → 「自信に満ちた表情」「成功者の余裕ある雰囲気」
-- ドッキリ系 → 「驚愕の表情」「パニック状態の様子」
-- 感動系 → 「涙を流している表情」「感極まった様子」`
+ルール:
+1. 文言は4〜8文字のインパクトある短いキーワード
+2. 素材提案はAI画像生成では作れないものだけを提案（実写の本人写真、特定の商品、実際の場所など）
+3. 素材提案は2〜3個の箇条書きで簡潔に`
           }],
         },
       });
@@ -404,20 +402,32 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
     }
   };
 
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [materialDescriptions, setMaterialDescriptions] = useState<Record<string, string>>({});
+
   const handleMaterialUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
+    setPendingFiles(Array.from(files));
+  };
 
-    const newMaterials: MaterialItem[] = Array.from(files).map(file => ({
+  const confirmMaterialUpload = (descriptions: string[]) => {
+    const newMaterials: MaterialItem[] = pendingFiles.map((file, idx) => ({
       id: crypto.randomUUID(),
       file,
       preview: URL.createObjectURL(file),
+      description: descriptions[idx] || '',
     }));
 
     setWorkflow(prev => ({
       ...prev,
       materials: [...prev.materials, ...newMaterials].slice(0, 5),
     }));
+    setPendingFiles([]);
+  };
+
+  const cancelPendingUpload = () => {
+    setPendingFiles([]);
   };
 
   const removeMaterial = (id: string) => {
@@ -484,8 +494,13 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
       // Collect reference thumbnail URLs
       const referenceImages = workflow.selectedReferences.map(t => t.thumbnail_url);
       
-      // Use the thumbnail text as the main prompt
-      const prompt = workflow.text;
+      // Build prompt with video title and description
+      const materialDescText = workflow.materials.length > 0 
+        ? `\n使用素材: ${workflow.materials.map(m => m.description || '素材').join('、')}`
+        : '';
+      
+      const prompt = `動画タイトル「${workflow.videoTitle}」のサムネイル。
+文言: ${workflow.text}${workflow.videoDescription ? `\n動画内容: ${workflow.videoDescription}` : ''}${materialDescText}`;
 
       console.log('Generating with', referenceImages.length, 'reference images');
 
@@ -553,6 +568,7 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
       isABTest: true,
       selectedReferences: [],
       videoTitle: '',
+      videoDescription: '',
       text: '',
       materials: [],
     }));
@@ -646,7 +662,7 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
                 <CardContent className="space-y-4">
                   <div className="space-y-3">
                     <label className="text-sm font-medium flex items-center gap-2">
-                      📹 動画タイトル
+                      📹 動画タイトル <span className="text-destructive">*</span>
                     </label>
                     <Input
                       value={workflow.videoTitle}
@@ -654,8 +670,20 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
                       placeholder="例: 【灼熱風呂】限界まで耐えたら〇〇円チャレンジ"
                       className="bg-secondary/50"
                     />
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium flex items-center gap-2">
+                      📝 動画の内容（任意）
+                    </label>
+                    <Textarea
+                      value={workflow.videoDescription}
+                      onChange={(e) => setWorkflow(prev => ({ ...prev, videoDescription: e.target.value }))}
+                      placeholder="例: 50度のお風呂に限界まで入って耐えるチャレンジ企画。最後にサプライズがある。"
+                      className="bg-secondary/50 min-h-[80px]"
+                    />
                     <p className="text-xs text-muted-foreground">
-                      動画の内容がわかるタイトルを入力してください
+                      動画内容を入力するとより適切な提案が得られます
                     </p>
                   </div>
 
@@ -986,25 +1014,66 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
                     </div>
                   )}
 
-                  {/* Upload Area */}
-                  <label className="block">
-                    <div className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors">
-                      <Upload className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-                      <p className="text-sm text-muted-foreground">
-                        クリックまたはドラッグ&ドロップで画像をアップロード
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        PNG, JPG, WEBP（最大5枚）
-                      </p>
+                  {/* Pending Upload - Description Input */}
+                  {pendingFiles.length > 0 && (
+                    <div className="space-y-4 p-4 bg-secondary/30 rounded-lg border border-border">
+                      <h4 className="text-sm font-medium">アップロードする画像の説明を入力</h4>
+                      {pendingFiles.map((file, idx) => (
+                        <div key={idx} className="flex items-start gap-3">
+                          <img
+                            src={URL.createObjectURL(file)}
+                            alt="Preview"
+                            className="w-20 h-12 object-cover rounded"
+                          />
+                          <div className="flex-1">
+                            <Input
+                              placeholder="例: 驚いた表情の自撮り"
+                              className="bg-background"
+                              onChange={(e) => setMaterialDescriptions(prev => ({
+                                ...prev,
+                                [idx]: e.target.value
+                              }))}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex gap-2 justify-end">
+                        <Button variant="outline" size="sm" onClick={cancelPendingUpload}>
+                          キャンセル
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          onClick={() => confirmMaterialUpload(
+                            pendingFiles.map((_, idx) => materialDescriptions[idx] || '')
+                          )}
+                        >
+                          追加する
+                        </Button>
+                      </div>
                     </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      onChange={handleMaterialUpload}
-                      className="hidden"
-                    />
-                  </label>
+                  )}
+
+                  {/* Upload Area */}
+                  {pendingFiles.length === 0 && (
+                    <label className="block">
+                      <div className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors">
+                        <Upload className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+                        <p className="text-sm text-muted-foreground">
+                          クリックまたはドラッグ&ドロップで画像をアップロード
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          PNG, JPG, WEBP（最大5枚）
+                        </p>
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleMaterialUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
 
                   {/* Uploaded Materials */}
                   {workflow.materials.length > 0 && (
@@ -1013,9 +1082,14 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
                         <div key={m.id} className="relative group">
                           <img
                             src={m.preview}
-                            alt="Material"
+                            alt={m.description || 'Material'}
                             className="aspect-video object-cover rounded-lg"
                           />
+                          {m.description && (
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/70 p-1 rounded-b-lg">
+                              <p className="text-xs text-white truncate">{m.description}</p>
+                            </div>
+                          )}
                           <button
                             onClick={() => removeMaterial(m.id)}
                             className="absolute top-1 right-1 w-6 h-6 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs"
