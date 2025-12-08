@@ -52,10 +52,13 @@ serve(async (req) => {
     }
 
     // Add reference images if provided (skip duplicates with base image)
+    // Limit to 3 reference images to prevent context overflow
+    const maxReferenceImages = 3;
     if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-      console.log(`Including ${referenceImages.length} reference images (assets: ${assetCount}, own channel: ${ownChannelCount}, competitor: ${competitorCount})`);
+      const limitedRefs = referenceImages.slice(0, maxReferenceImages);
+      console.log(`Including ${limitedRefs.length} reference images (limited from ${referenceImages.length}, assets: ${assetCount}, own channel: ${ownChannelCount}, competitor: ${competitorCount})`);
       
-      for (const imageUrl of referenceImages) {
+      for (const imageUrl of limitedRefs) {
         // ベース画像と重複する場合はスキップ
         if (imageUrl && typeof imageUrl === 'string' && imageUrl !== baseImage) {
           messageContent.push({
@@ -195,51 +198,72 @@ CRITICAL: Do NOT put long text or video titles on the thumbnail. Use minimal tex
     console.log('Reference count:', referenceImages?.length || 0);
     console.log('Using edit approach:', shouldUseEditMode);
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-3-pro-image-preview',
-        messages: [
-          {
-            role: 'user',
-            content: messageContent,
-          },
-        ],
-        modalities: ['image', 'text'],
-      }),
-    });
+    // Retry logic for image generation
+    const maxRetries = 2;
+    let lastError: Error | null = null;
+    let imageUrl: string | null = null;
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'レート制限に達しました。しばらくお待ちください。' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        console.log(`Retry attempt ${attempt}/${maxRetries}`);
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: 'クレジットが不足しています。' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash-image-preview',
+          messages: [
+            {
+              role: 'user',
+              content: messageContent,
+            },
+          ],
+          modalities: ['image', 'text'],
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          return new Response(
+            JSON.stringify({ error: 'レート制限に達しました。しばらくお待ちください。' }),
+            { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        if (response.status === 402) {
+          return new Response(
+            JSON.stringify({ error: 'クレジットが不足しています。' }),
+            { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        const errorText = await response.text();
+        console.error('AI Gateway error:', response.status, errorText);
+        lastError = new Error('AI Gateway error');
+        continue;
       }
-      const errorText = await response.text();
-      console.error('AI Gateway error:', response.status, errorText);
-      throw new Error('AI Gateway error');
+
+      const data = await response.json();
+      console.log('AI Gateway response received');
+
+      // Extract image URL from the response
+      imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+
+      if (imageUrl) {
+        console.log('Image generated successfully');
+        break;
+      } else {
+        console.error(`Attempt ${attempt + 1}: No image URL in response:`, JSON.stringify(data).substring(0, 500));
+        lastError = new Error('画像の生成に失敗しました');
+      }
     }
 
-    const data = await response.json();
-    console.log('AI Gateway response received');
-
-    // Extract image URL from the response
-    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-
     if (!imageUrl) {
-      console.error('No image URL in response:', JSON.stringify(data));
-      throw new Error('画像の生成に失敗しました');
+      throw lastError || new Error('画像の生成に失敗しました');
     }
 
     return new Response(
