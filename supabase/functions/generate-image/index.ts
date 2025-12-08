@@ -11,7 +11,18 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, referenceImages, assetCount = 0, ownChannelCount = 0, competitorCount = 0, editMode = false, originalImage = null } = await req.json();
+    const { 
+      prompt, 
+      referenceImages, 
+      assetCount = 0, 
+      ownChannelCount = 0, 
+      competitorCount = 0, 
+      editMode = false, 
+      originalImage = null,
+      modelImage = null,
+      preserveModelPerson = false
+    } = await req.json();
+    
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
     if (!LOVABLE_API_KEY) {
@@ -25,24 +36,29 @@ serve(async (req) => {
     // Build message content with optional reference images
     const messageContent: any[] = [];
 
-    // For edit mode, add the original image first
-    if (editMode && originalImage) {
-      console.log('Edit mode: Including original image for modification');
+    // モデル画像があり、人物保持モードの場合は編集モードとして扱う
+    const useEditMode = editMode || (modelImage && preserveModelPerson);
+    const baseImage = originalImage || modelImage;
+
+    // For edit mode or model preservation mode, add the base image first
+    if (useEditMode && baseImage) {
+      console.log('Edit/Preservation mode: Including base image for modification');
       messageContent.push({
         type: 'image_url',
         image_url: {
-          url: originalImage,
+          url: baseImage,
         },
       });
     }
 
-    // Add reference images first if provided
+    // Add reference images if provided
     // Order: registered assets first, then own channel thumbnails, then competitor thumbnails
     if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
       console.log(`Including ${referenceImages.length} reference images (assets: ${assetCount}, own channel: ${ownChannelCount}, competitor: ${competitorCount})`);
       
       for (const imageUrl of referenceImages) {
-        if (imageUrl && typeof imageUrl === 'string') {
+        // モデル画像と重複する場合はスキップ（既に追加済み）
+        if (imageUrl && typeof imageUrl === 'string' && imageUrl !== baseImage) {
           messageContent.push({
             type: 'image_url',
             image_url: {
@@ -86,6 +102,35 @@ Competitor Channel Thumbnails (${competitorCount} images at the end):
 `
       : '';
 
+    // モデル画像の人物保持モード用プロンプト
+    const modelPreservationPrompt = modelImage && preserveModelPerson
+      ? `You are editing an existing YouTube thumbnail image. The FIRST image provided is the MODEL/BASE thumbnail.
+
+【最重要 - 人物の完全保持】
+この画像に含まれる人物・キャラクターを「絶対に」そのまま維持してください：
+1. 顔の形状、顔の特徴、肌の色、髪型を「完全に同一」に保つこと
+2. 表情、ポーズ、体の向きを変更しないこと
+3. 服装、アクセサリーをそのまま維持すること
+4. 人物の位置・配置を変更しないこと
+5. 新しい人物を追加しないこと
+6. 人物を削除しないこと
+7. 人物の見た目を「一切変更しない」こと
+
+【編集ルール】
+- 背景やエフェクトは必要に応じて調整可能
+- 文字・テキストの追加・変更は許可
+- 色調補正は許可（ただし人物の肌色等は維持）
+- 構図・レイアウトは元画像を維持
+
+【出力仕様】
+- アスペクト比: 16:9 (1280x720)
+- 元画像の人物が「そのまま」認識できること
+
+User's request: ${prompt}
+
+CRITICAL: The person in the output MUST be 100% identical to the person in the input image. Do NOT generate a new person or alter their appearance in any way.`
+      : null;
+
     // Edit mode prompt - preserve unchanged parts
     const editModePrompt = editMode && originalImage
       ? `You are editing an existing YouTube thumbnail image. The FIRST image provided is the ORIGINAL thumbnail that needs modification.
@@ -106,7 +151,10 @@ User's modification request: ${prompt}
 Remember: ONLY change what the user specifically asked to change. Everything else must remain IDENTICAL to the original image.`
       : null;
 
-    const enhancedPrompt = editModePrompt 
+    // プロンプトの優先順位: モデル保持 > 編集モード > 通常生成
+    const enhancedPrompt = modelPreservationPrompt 
+      ? modelPreservationPrompt
+      : editModePrompt 
       ? editModePrompt
       : referenceImages && referenceImages.length > 0
       ? `You are a professional YouTube thumbnail designer. Study the reference images provided carefully.
@@ -154,7 +202,8 @@ CRITICAL: Do NOT put long text or video titles on the thumbnail. Use minimal tex
 
     console.log('Generating image with', referenceImages?.length || 0, 'total reference images');
     console.log('Edit mode:', editMode, 'Has original:', !!originalImage);
-    console.log('Prompt preview:', enhancedPrompt.substring(0, 400) + '...');
+    console.log('Model preservation mode:', preserveModelPerson, 'Has model image:', !!modelImage);
+    console.log('Prompt preview:', enhancedPrompt.substring(0, 500) + '...');
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
