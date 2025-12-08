@@ -108,12 +108,32 @@ export default function ThumbnailWorkflow() {
   const [suggestedReferences, setSuggestedReferences] = useState<ChannelThumbnail[]>([]);
   const [isLoadingSuggestedRefs, setIsLoadingSuggestedRefs] = useState(false);
 
+  // Channel assets (registered in settings)
+  interface ChannelAsset {
+    id: string;
+    name: string;
+    asset_type: 'self' | 'member' | 'character' | 'channel_icon' | 'other';
+    image_url: string;
+    description: string | null;
+  }
+  const [channelAssets, setChannelAssets] = useState<ChannelAsset[]>([]);
+
   const [aiGuidance, setAiGuidance] = useState<AIGuidance | null>(null);
 
   useEffect(() => {
     fetchChannels();
     fetchStoredThumbnails();
+    fetchChannelAssets();
   }, [user]);
+
+  const fetchChannelAssets = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('channel_assets')
+      .select('*')
+      .eq('user_id', user.id);
+    setChannelAssets(data || []);
+  };
 
   // Initial guidance for step 1
   useEffect(() => {
@@ -555,25 +575,43 @@ ${referenceInfo.length > 0 ? `参考サムネイル:\n${referenceInfo.map((r, i)
       // Own channel refs first for better person recognition
       const referenceImages = [...ownChannelRefs, ...competitorRefs].map(t => t.thumbnail_url);
       
+      // Get registered channel assets (always include these)
+      const selfAssets = channelAssets.filter(a => a.asset_type === 'self');
+      const memberAssets = channelAssets.filter(a => a.asset_type === 'member');
+      const characterAssets = channelAssets.filter(a => a.asset_type === 'character');
+      const channelIconAssets = channelAssets.filter(a => a.asset_type === 'channel_icon');
+      
+      // Build registered assets info for prompt
+      const registeredAssetsInfo = channelAssets.length > 0
+        ? `\n\n【登録済み素材（必ず参照）】\n${selfAssets.map(a => `- 自分「${a.name}」${a.description ? `: ${a.description}` : ''}`).join('\n')}${memberAssets.length > 0 ? '\n' + memberAssets.map(a => `- メンバー「${a.name}」${a.description ? `: ${a.description}` : ''}`).join('\n') : ''}${characterAssets.length > 0 ? '\n' + characterAssets.map(a => `- キャラクター「${a.name}」${a.description ? `: ${a.description}` : ''}`).join('\n') : ''}`
+        : '';
+      
       // Build prompt with video title, description, and person info
       const materialDescText = workflow.materials.length > 0 
         ? `\n使用素材: ${workflow.materials.map(m => m.description || '素材').join('、')}`
         : '';
       
       // Include info about own channel references for person consistency
-      const personInfo = ownChannelRefs.length > 0
-        ? `\n登場人物: 参考サムネイル（自チャンネル${ownChannelRefs.length}枚）に登場する人物と同じ人物を使用してください。顔の特徴、髪型、雰囲気を一致させてください。`
+      const personInfo = selfAssets.length > 0
+        ? `\n登場人物: 登録された「自分」の画像に写っている人物をメインキャラクターとして使用してください。顔の特徴、髪型、雰囲気を完全に一致させてください。`
+        : ownChannelRefs.length > 0
+        ? `\n登場人物: 参考サムネイル（自チャンネル${ownChannelRefs.length}枚）に登場する人物と同じ人物を使用してください。`
         : '';
       
       const prompt = `動画タイトル「${workflow.videoTitle}」のYouTubeサムネイル。
-文言: ${workflow.text}${workflow.videoDescription ? `\n動画内容: ${workflow.videoDescription}` : ''}${personInfo}${materialDescText}`;
+文言: ${workflow.text}${workflow.videoDescription ? `\n動画内容: ${workflow.videoDescription}` : ''}${personInfo}${registeredAssetsInfo}${materialDescText}`;
 
-      console.log('Generating with', referenceImages.length, 'reference images (own:', ownChannelRefs.length, ')');
+      // Collect all asset images to send as references
+      const assetImages = channelAssets.map(a => a.image_url);
+      const allReferenceImages = [...assetImages, ...referenceImages];
+
+      console.log('Generating with', allReferenceImages.length, 'reference images (assets:', assetImages.length, ', own:', ownChannelRefs.length, ')');
 
       const { data, error } = await supabase.functions.invoke('generate-image', {
         body: { 
           prompt,
-          referenceImages,
+          referenceImages: allReferenceImages,
+          assetCount: assetImages.length,
           ownChannelCount: ownChannelRefs.length,
         },
       });

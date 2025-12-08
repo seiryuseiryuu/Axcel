@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, referenceImages, ownChannelCount = 0 } = await req.json();
+    const { prompt, referenceImages, assetCount = 0, ownChannelCount = 0 } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
     if (!LOVABLE_API_KEY) {
@@ -26,8 +26,9 @@ serve(async (req) => {
     const messageContent: any[] = [];
 
     // Add reference images first if provided
+    // Order: registered assets first, then own channel thumbnails, then competitor thumbnails
     if (referenceImages && Array.isArray(referenceImages) && referenceImages.length > 0) {
-      console.log(`Including ${referenceImages.length} reference images (own channel: ${ownChannelCount})`);
+      console.log(`Including ${referenceImages.length} reference images (assets: ${assetCount}, own channel: ${ownChannelCount})`);
       
       for (const imageUrl of referenceImages) {
         if (imageUrl && typeof imageUrl === 'string') {
@@ -41,29 +42,42 @@ serve(async (req) => {
       }
     }
 
-    // Create detailed prompt for YouTube thumbnail generation with person consistency
-    const personConsistencyNote = ownChannelCount > 0
+    // Create detailed prompt for YouTube thumbnail generation with registered assets and person consistency
+    const assetNote = assetCount > 0
       ? `
-CRITICAL - Person Consistency:
-- The first ${ownChannelCount} reference image(s) are from the creator's own channel
-- You MUST use the SAME PERSON who appears in these own-channel references
-- Match their: face shape, facial features, hair style, skin tone, and overall appearance
-- This person is the main character of the channel - they must look identical across all thumbnails
-- Study the person's expression style and body language from the references
+CRITICAL - Registered Channel Assets (HIGHEST PRIORITY):
+- The first ${assetCount} reference image(s) are registered channel assets
+- These include the channel's main person(s), characters, and icons
+- You MUST use these people/characters EXACTLY as they appear
+- Match their: face shape, facial features, hair style, skin tone, clothing style, and overall appearance PERFECTLY
+- These are the channel's identity - they must be recognizable across all thumbnails
+- If there's a "自分" (self) image, that person MUST be the main character in the thumbnail
+`
+      : '';
+
+    const ownChannelNote = ownChannelCount > 0 && assetCount === 0
+      ? `
+Person Consistency (from own channel thumbnails):
+- Reference images from the creator's own channel are provided
+- Use the SAME PERSON who appears in these own-channel references
+- Match their face and appearance consistently
 `
       : '';
 
     const enhancedPrompt = referenceImages && referenceImages.length > 0
-      ? `You are a professional YouTube thumbnail designer. Study the reference thumbnails provided carefully.
-${personConsistencyNote}
+      ? `You are a professional YouTube thumbnail designer. Study the reference images provided carefully.
+${assetNote}${ownChannelNote}
 Based on these references, create a NEW YouTube thumbnail with these specifications:
 - Aspect ratio: 16:9 (1280x720)
 - Main content: ${prompt}
 - Style: Match the visual style, energy, and color palette of the reference thumbnails
 - Make it eye-catching, high contrast, and professional
-- Incorporate similar design elements (text effects, overlays, color gradients) from the references
+- The people in the registered assets MUST appear in the thumbnail with EXACT likeness
 
-Important: Create an original thumbnail inspired by the references. The person should look exactly like they do in the own-channel references.`
+IMPORTANT: 
+- The person(s) from registered assets must be the MAIN focus
+- Their face must be clearly visible and recognizable
+- Create an original composition inspired by the style references`
       : `Create a professional YouTube thumbnail image in 16:9 aspect ratio (1280x720). ${prompt}. 
 Style: High contrast, vibrant colors, eye-catching design suitable for YouTube. 
 Make it visually striking and attention-grabbing. Wide landscape format.`;
@@ -74,8 +88,8 @@ Make it visually striking and attention-grabbing. Wide landscape format.`;
       text: enhancedPrompt,
     });
 
-    console.log('Generating image with', referenceImages?.length || 0, 'reference images');
-    console.log('Prompt preview:', enhancedPrompt.substring(0, 300) + '...');
+    console.log('Generating image with', referenceImages?.length || 0, 'total reference images');
+    console.log('Prompt preview:', enhancedPrompt.substring(0, 400) + '...');
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',

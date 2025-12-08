@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      channel_assets: {
+        Row: {
+          asset_type: Database["public"]["Enums"]["asset_type"]
+          created_at: string
+          description: string | null
+          id: string
+          image_url: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          asset_type?: Database["public"]["Enums"]["asset_type"]
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url: string
+          name: string
+          user_id: string
+        }
+        Update: {
+          asset_type?: Database["public"]["Enums"]["asset_type"]
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       channel_settings: {
         Row: {
           channel_name: string
@@ -232,7 +262,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      asset_type: "self" | "member" | "character" | "channel_icon" | "other"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -359,6 +389,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      asset_type: ["self", "member", "character", "channel_icon", "other"],
+    },
   },
 } as const
