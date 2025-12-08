@@ -12,10 +12,10 @@ serve(async (req) => {
 
   try {
     const { prompt, referenceImages, assetCount = 0, ownChannelCount = 0, competitorCount = 0, editMode = false, originalImage = null } = await req.json();
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
-    if (!GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY is not configured');
+    if (!LOVABLE_API_KEY) {
+      throw new Error('LOVABLE_API_KEY is not configured');
     }
 
     if (!prompt) {
@@ -156,39 +156,21 @@ CRITICAL: Do NOT put long text or video titles on the thumbnail. Use minimal tex
     console.log('Edit mode:', editMode, 'Has original:', !!originalImage);
     console.log('Prompt preview:', enhancedPrompt.substring(0, 400) + '...');
 
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent', {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
         'Content-Type': 'application/json',
-        'x-goog-api-key': GEMINI_API_KEY,
       },
       body: JSON.stringify({
-        contents: [{
-          parts: messageContent.map(item => {
-            if (item.type === 'text') {
-              return { text: item.text };
-            } else if (item.type === 'image_url') {
-              // For base64 images
-              if (item.image_url.url.startsWith('data:')) {
-                const matches = item.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
-                if (matches) {
-                  return {
-                    inline_data: {
-                      mime_type: matches[1],
-                      data: matches[2]
-                    }
-                  };
-                }
-              }
-              // For URLs, we need to fetch and convert to base64
-              return { text: `[Reference image: ${item.image_url.url}]` };
-            }
-            return null;
-          }).filter(Boolean)
-        }],
-        generationConfig: {
-          responseModalities: ['Text', 'Image']
-        }
+        model: 'google/gemini-3-pro-image-preview',
+        messages: [
+          {
+            role: 'user',
+            content: messageContent,
+          },
+        ],
+        modalities: ['image', 'text'],
       }),
     });
 
@@ -199,28 +181,25 @@ CRITICAL: Do NOT put long text or video titles on the thumbnail. Use minimal tex
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+      if (response.status === 402) {
+        return new Response(
+          JSON.stringify({ error: 'クレジットが不足しています。' }),
+          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
       const errorText = await response.text();
-      console.error('Gemini API error:', response.status, errorText);
-      throw new Error('Gemini API error: ' + errorText);
+      console.error('AI Gateway error:', response.status, errorText);
+      throw new Error('AI Gateway error');
     }
 
     const data = await response.json();
-    console.log('Gemini API response received');
+    console.log('AI Gateway response received');
 
-    // Extract image from Gemini response
-    let imageUrl = null;
-    const candidates = data.candidates;
-    if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
-      for (const part of candidates[0].content.parts) {
-        if (part.inlineData) {
-          imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-          break;
-        }
-      }
-    }
+    // Extract image URL from the response
+    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
 
     if (!imageUrl) {
-      console.error('No image in response:', JSON.stringify(data));
+      console.error('No image URL in response:', JSON.stringify(data));
       throw new Error('画像の生成に失敗しました');
     }
 
