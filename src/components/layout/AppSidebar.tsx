@@ -23,7 +23,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   LayoutDashboard,
-  MessageSquare,
   ImageIcon,
   Settings,
   Youtube,
@@ -36,7 +35,6 @@ import {
 const navItems = [
   { title: 'ダッシュボード', url: '/', icon: LayoutDashboard },
   { title: 'サムネイル作成', url: '/create', icon: Wand2 },
-  { title: 'AIチャット', url: '/chat', icon: MessageSquare },
   { title: 'ギャラリー', url: '/gallery', icon: ImageIcon },
   { title: 'チャンネル設定', url: '/channels', icon: Settings },
 ];
@@ -104,10 +102,10 @@ export function AppSidebar() {
           <div className="mt-4 mx-2 p-4 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20">
             <div className="flex items-center gap-2 mb-2">
               <Sparkles className="w-4 h-4 text-primary" />
-              <span className="text-sm font-medium">AI機能</span>
+              <span className="text-sm font-medium">5ステップワークフロー</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              チャットでAIにサムネイルアイデアを相談しましょう
+              AIガイドに沿って効果的なサムネイルを作成
             </p>
           </div>
         )}
