@@ -100,40 +100,60 @@ serve(async (req) => {
       throw new Error('No videos found');
     }
 
-    // Get video IDs for duration check
+    // Get video IDs for duration and dimension check
     const videoIds = playlistData.items.map((item: any) => item.snippet.resourceId.videoId).join(',');
     
-    // Get video details including duration to filter out Shorts (< 60 seconds)
+    // Get video details including duration and dimensions to filter out Shorts
     const videosResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${YOUTUBE_API_KEY}`
+      `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,snippet&id=${videoIds}&key=${YOUTUBE_API_KEY}`
     );
     const videosData = await videosResponse.json();
     
-    // Create a map of video durations (parse ISO 8601 duration)
-    const videoDurations: Record<string, number> = {};
+    // Create maps for video info
+    const videoInfo: Record<string, { duration: number; isShort: boolean }> = {};
     for (const video of videosData.items || []) {
       const duration = video.contentDetails.duration;
       // Parse ISO 8601 duration (e.g., PT1M30S, PT30S, PT1H2M3S)
       const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+      let durationSeconds = 0;
       if (match) {
         const hours = parseInt(match[1] || '0');
         const minutes = parseInt(match[2] || '0');
         const seconds = parseInt(match[3] || '0');
-        videoDurations[video.id] = hours * 3600 + minutes * 60 + seconds;
+        durationSeconds = hours * 3600 + minutes * 60 + seconds;
       }
+      
+      // Check multiple indicators for Shorts
+      const title = video.snippet?.title || '';
+      const description = video.snippet?.description || '';
+      const tags = video.snippet?.tags || [];
+      
+      // Shorts detection:
+      // 1. Duration under 60 seconds
+      // 2. Title contains #Shorts or #shorts
+      // 3. Tags contain "shorts"
+      // 4. Description contains #Shorts
+      const hasShortHashtag = 
+        /#shorts/i.test(title) || 
+        /#shorts/i.test(description) ||
+        tags.some((tag: string) => /^shorts$/i.test(tag));
+      
+      const isShort = durationSeconds < 60 || durationSeconds <= 180 && hasShortHashtag;
+      
+      videoInfo[video.id] = { duration: durationSeconds, isShort };
     }
 
     console.log(`Found ${playlistData.items.length} videos, filtering out Shorts...`);
 
-    // Process and save thumbnails (exclude Shorts - videos under 60 seconds)
+    // Process and save thumbnails (exclude Shorts)
     const thumbnails = [];
     for (const item of playlistData.items) {
       const videoId = item.snippet.resourceId.videoId;
-      const duration = videoDurations[videoId] || 0;
+      const info = videoInfo[videoId];
       
-      // Skip Shorts (videos under 60 seconds)
-      if (duration < 60) {
-        console.log(`Skipping Short: ${item.snippet.title} (${duration}s)`);
+      // Skip Shorts
+      if (!info || info.isShort) {
+        console.log(`Skipping Short: ${item.snippet.title} (${info?.duration || 0}s)`);
         continue;
       }
       
