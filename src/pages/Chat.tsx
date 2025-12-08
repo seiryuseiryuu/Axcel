@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+import ReactMarkdown from 'react-markdown';
 import {
   Send,
   Loader2,
@@ -338,13 +339,19 @@ export default function Chat() {
                       }`}
                     >
                       <CardContent className="p-3">
-                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                        {message.role === 'assistant' ? (
+                          <div className="prose prose-sm prose-invert max-w-none text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-1 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_code]:bg-secondary [&_code]:px-1 [&_code]:rounded [&_pre]:bg-secondary [&_pre]:p-2 [&_pre]:rounded-md [&_strong]:text-foreground [&_a]:text-primary">
+                            <ReactMarkdown>{message.content}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                        )}
                         {message.imageUrl && (
                           <div className="mt-3 space-y-2">
                             <img
                               src={message.imageUrl}
                               alt="Generated thumbnail"
-                              className="rounded-lg max-w-full"
+                              className="rounded-lg max-w-full aspect-video object-cover"
                             />
                             <div className="flex gap-2">
                               <Button
