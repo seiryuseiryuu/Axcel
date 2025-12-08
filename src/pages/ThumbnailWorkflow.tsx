@@ -692,11 +692,13 @@ ${selectedModel ? `【選択モデル】${selectedModel.description}` : ''}
     try {
       const { data, error } = await supabase.functions.invoke('generate-image', {
         body: { 
-          prompt: `修正指示: ${refinementInstruction}\n元タイトル: ${workflow.videoTitle}\n文言: ${workflow.text}`,
-          referenceImages: [imageUrl],
+          prompt: refinementInstruction,
+          editMode: true,
+          originalImage: imageUrl,
+          referenceImages: [],
           assetCount: 0,
           ownChannelCount: 0,
-          competitorCount: 1,
+          competitorCount: 0,
         },
       });
 
