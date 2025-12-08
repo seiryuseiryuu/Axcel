@@ -22,11 +22,10 @@ serve(async (req) => {
       throw new Error('Prompt is required');
     }
 
-    // Create a detailed prompt for YouTube thumbnail generation
-    const enhancedPrompt = `Create a professional YouTube thumbnail image. ${prompt}. 
+    // Create a detailed prompt for YouTube thumbnail generation (16:9 aspect ratio)
+    const enhancedPrompt = `Create a professional YouTube thumbnail image in 16:9 aspect ratio (1280x720). ${prompt}. 
 Style: High contrast, vibrant colors, eye-catching design suitable for YouTube. 
-Aspect ratio: 16:9 landscape orientation.
-Make it visually striking and attention-grabbing.`;
+Make it visually striking and attention-grabbing. Wide landscape format.`;
 
     console.log('Generating image with prompt:', enhancedPrompt);
 
@@ -37,7 +36,7 @@ Make it visually striking and attention-grabbing.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-image-preview',
+        model: 'google/gemini-3-pro-image-preview',
         messages: [
           {
             role: 'user',
