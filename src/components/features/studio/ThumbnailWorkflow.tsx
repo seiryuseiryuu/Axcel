@@ -405,6 +405,29 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                                             {model.description}
                                         </p>
 
+                                        {/* Logic Tags */}
+                                        {(() => {
+                                            const pattern = workflow.patternAnalysis?.patterns.find(p => p.name === model.patternName);
+                                            if (!pattern) return null;
+                                            return (
+                                                <div className="flex flex-wrap gap-1 mt-2">
+                                                    {pattern.characteristics.sentiment && (
+                                                        <Badge variant="secondary" className="text-[10px] px-1.5 h-5 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20">
+                                                            {pattern.characteristics.sentiment}
+                                                        </Badge>
+                                                    )}
+                                                    <Badge variant="outline" className="text-[10px] px-1.5 h-5 text-muted-foreground">
+                                                        {pattern.characteristics.textPosition}
+                                                    </Badge>
+                                                    {pattern.characteristics.subjectType !== 'none' && (
+                                                        <Badge variant="outline" className="text-[10px] px-1.5 h-5 text-muted-foreground">
+                                                            {pattern.characteristics.subjectType === 'real_person' ? '人物' : 'イラスト'}
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
+
                                         {/* Suggested Texts */}
                                         <div className="flex flex-wrap gap-1.5">
                                             {model.suggestedTexts.slice(0, 3).map((s, j) => (

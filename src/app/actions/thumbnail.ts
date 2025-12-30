@@ -11,6 +11,8 @@ export interface PatternCategory {
     characteristics: {
         subjectType: 'real_person' | 'illustration' | 'character' | 'none';
         textPosition: string;
+        textScale?: string;
+        sentiment?: 'positive' | 'negative' | 'neutral' | 'shocking' | 'emotional';
         textStyle?: string;
         colorScheme: string;
         colorMood?: string;
@@ -128,6 +130,7 @@ ${images.length}枚のYouTubeサムネイル画像を視覚的に詳細分析し
       "text": {
         "content": "テロップ内容",
         "position": "配置（例：画面上部80%を占有）",
+        "scale": "文字サイズ（例：巨大、中、小）",
         "style": "デザイン概要（例：金色の極太ゴシックに赤の境界線）",
         "typography": {
            "fontFamily": "フォント種別（例：極太ゴシック、明朝体、筆文字）",
@@ -145,6 +148,7 @@ ${images.length}枚のYouTubeサムネイル画像を視覚的に詳細分析し
       },
       "vibe": {
         "mood": "テンション感",
+        "sentiment": "感情の方向性（positive/negative/neutral/shock）",
         "colorScheme": "配色"
       }
     }
@@ -237,32 +241,36 @@ ${thumbnailTitles.map((t, i) => `画像${i + 1}: ${t}`).join('\n')}
         }
 
         // Stage 2: Pattern Extraction
-        const stage2Prompt = `【第2段階：パターン抽出と絞り込み】
+        const stage2Prompt = `【第2段階：高度なパターン抽出と構造化分類】
 
 以下は${thumbnailUrls.length}枚のサムネイル画像の個別分析結果です。
-これらを分析し、**効果的なパターンを「2〜3個」に厳選**して分類してください。
+これらを分析し、**「共通点（構図・感情・文字配置）」を持つ画像をグループ化**し、最も有力な「2〜3個のパターン」を抽出してください。
 
 【個別分析データ】
 ${JSON.stringify(individualAnalysis, null, 2)}
 
-【必須要件】
-1. **2つ、または3つのパターンのみ**を出力してください。
-2. 各パターンについて「テロップの配置」「テンション感」「人物とテロップの関係性」を詳細に定義してください。
-3. **Typography (超重要)**: フォントの種類、太さ、縁取り（二重枠など）、色使いについて、デザイナーへの指示レベルで具体的に記述してください。
-4. **該当画像番号**: どの画像がこのパターンに該当するか記述。
+【必須要件（分類ロジック）】
+1. **グルーピング基準**: 以下の要素が似ているものを同じパターンとして扱ってください。
+   - 「テロップの位置と大きさ」
+   - 「ポジティブ/ネガティブの感情（Sentiment）」
+   - 「人物の有無と配置」
+2. **パターン抽出数**: 2〜3個に厳選。
+3. **Typography (超重要)**: フォント指示は詳細に記述。
 
 【出力形式】
 {
   "patterns": [
     {
-      "name": "パターン名（例：危機感訴求型）",
+      "name": "パターン名（例：危機感訴求型、ハッピー報告型）",
       "description": "30文字以内の特徴説明",
       "matchCount": 3,
       "exampleImageIndices": [1, 3, 5],
       "characteristics": {
         "subjectType": "被写体の種類（real_person / illustration / character / none）",
-        "textPosition": "具体的な位置とサイズ感",
-        "textStyle": "【重要】フォント種別(ゴシック/明朝)、太さ(Heavy/Bold)、装飾(二重縁取り/ドロップシャドウ)、配色を詳細に記述。「インパクト重視」「可読性重視」などの意図も含める。",
+        "textPosition": "具体的な位置",
+        "textScale": "文字サイズ（巨大/中/小）",
+        "sentiment": "感情（positive/negative/neutral/shock）",
+        "textStyle": "詳細な文字デザイン指示",
         "colorScheme": "配色とムード",
         "colorMood": "詳細なテンション感",
         "personPosition": "人物配置",
@@ -300,9 +308,13 @@ ${JSON.stringify(individualAnalysis, null, 2)}
             const match = cleanJson.match(/\{[\s\S]*\}/);
             if (match) {
                 const parsed = JSON.parse(match[0]);
+                const patterns = Array.isArray(parsed.patterns) ? parsed.patterns : [];
+                const summary = parsed.summary || "分析完了";
+
                 return {
                     data: {
-                        ...parsed,
+                        patterns,
+                        summary,
                         individualAnalysis,
                     },
                     logs,
