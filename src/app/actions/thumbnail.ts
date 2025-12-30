@@ -320,9 +320,9 @@ export async function generateModelImages(
     }
 
     try {
-        const results: ModelImageInfo[] = [];
 
-        for (const pattern of patterns) {
+
+        const promises = patterns.map(async (pattern) => {
             logs.push(`[Model Gen] Starting '${pattern.name}' pattern...`);
 
             // Fetch reference images for this pattern based on exampleImageIndices
@@ -388,11 +388,16 @@ ${pattern.requiredMaterials?.props?.length ? `- Props: ${pattern.requiredMateria
 
             // Generate image using Gemini with reference if available
             let imageUrl: string;
-            if (referenceImages.length > 0) {
-                const { generateImageWithReference } = await import("@/lib/gemini");
-                imageUrl = await generateImageWithReference(promptForImage, referenceImages);
-            } else {
-                imageUrl = await generateThumbnailImage(promptForImage);
+            try {
+                if (referenceImages.length > 0) {
+                    const { generateImageWithReference } = await import("@/lib/gemini");
+                    imageUrl = await generateImageWithReference(promptForImage, referenceImages);
+                } else {
+                    imageUrl = await generateThumbnailImage(promptForImage);
+                }
+            } catch (e) {
+                console.error(`Failed to generate image for pattern ${pattern.name}:`, e);
+                return null;
             }
 
             // Generate text suggestions for this pattern
@@ -405,10 +410,9 @@ JSON形式で回答:
   ]
 }`;
 
-            const textResponse = await generateText(textSuggestionPrompt, 0.7);
             let suggestedTexts: { text: string; reason: string }[] = [];
-
             try {
+                const textResponse = await generateText(textSuggestionPrompt, 0.7);
                 const match = textResponse.match(/\{[\s\S]*\}/);
                 if (match) {
                     const parsed = JSON.parse(match[0]);
@@ -421,13 +425,15 @@ JSON形式で回答:
                 ];
             }
 
-            results.push({
+            return {
                 imageUrl,
                 patternName: pattern.name,
                 description: pattern.description,
                 suggestedTexts,
-            });
-        }
+            };
+        });
+
+        const results = (await Promise.all(promises)).filter(Boolean) as ModelImageInfo[];
 
         logs.push(`[Complete] Generated ${results.length} model images.`);
         return { data: results, logs };
