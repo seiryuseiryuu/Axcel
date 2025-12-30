@@ -15,6 +15,13 @@ export interface PatternCategory {
         colorMood?: string;
         personPosition: string;
         personExpression?: string;
+        personAttributes?: {
+            ageGroup: string;
+            gender: string;
+            hairStyle: string;
+            clothing: string;
+            distinctiveFeatures?: string;
+        };
         layout: string;
         visualTechniques?: string;
         effects?: string;
@@ -258,12 +265,19 @@ ${JSON.stringify(individualAnalysis, null, 2)}
         "colorMood": "詳細なテンション感",
         "personPosition": "人物配置",
         "personExpression": "表情",
+        "personAttributes": {
+          "ageGroup": "年代（例：20代前半、30代半ば、50代以上）",
+          "gender": "性別（例：男性、女性）",
+          "hairStyle": "髪型・色（例：黒髪短髪、茶髪ロング）",
+          "clothing": "服装（例：黒のパーカー、スーツ、白Tシャツ）",
+          "distinctiveFeatures": "特徴（例：眼鏡、ひげ、帽子）"
+        },
         "layout": "構図",
         "visualTechniques": "視線誘導、エフェクト"
       },
       "requiredMaterials": {
         "background": "背景詳細",
-        "person": "人物詳細",
+        "person": "人物詳細（上記の属性を含む）",
         "props": ["小物"]
       },
       "designRules": [
@@ -370,7 +384,10 @@ export async function generateModelImages(
 [PERSON/SUBJECT]
 - Position: ${pattern.characteristics.personPosition}
 - Expression: ${pattern.characteristics.personExpression || 'expressive, engaging'}
-- IMPORTANT: Reproduce the person's pose and expression style from reference images
+- Age/Gender: ${pattern.characteristics.personAttributes?.ageGroup || 'Young'}, ${pattern.characteristics.personAttributes?.gender || 'Male'}
+- Looks: ${pattern.characteristics.personAttributes?.hairStyle || 'Black hair'}, ${pattern.characteristics.personAttributes?.clothing || 'Simple clothes'}
+${pattern.characteristics.personAttributes?.distinctiveFeatures ? `- Features: ${pattern.characteristics.personAttributes.distinctiveFeatures}` : ''}
+- IMPORTANT: Reproduce the specific PERSON ATTRIBUTES above. Do not generate a generic older person if "Young" is specified.
 
 [LAYOUT & COMPOSITION]
 - Layout: ${pattern.characteristics.layout}
@@ -506,6 +523,8 @@ export async function generateFinalThumbnails(
 
 [MANDATORY - EXACT TEXT]
 The ONLY text on this thumbnail must be: "${text}"
+- IMPORTANT: Render the Japanese text "${text}" clearly and legibly.
+- Avoid broken characters or "alien" text. Use standard Japanese characters.
 - DO NOT add any other text, labels, watermarks, or typography
 - Text position: prominent center or upper area, maximum visibility
 
@@ -522,12 +541,14 @@ The ONLY text on this thumbnail must be: "${text}"
 - Pattern name: ${modelImage?.patternName || 'professional thumbnail'}
 - Use the model image as the primary visual base
 - Maintain the same person, pose, expression, lighting, and composition from the model
+- PERSON: ${patternData?.characteristics?.personAttributes?.ageGroup || ''} ${patternData?.characteristics?.personAttributes?.gender || ''} ${patternData?.characteristics?.personAttributes?.hairStyle || ''}
 - Color scheme: ${colorScheme}
 
 [SPECIFICATIONS]
 - Resolution: 1280x720 (16:9 aspect ratio)
 - Style: ${patternData?.description || 'eye-catching YouTube thumbnail'}
 ${patternData?.characteristics?.visualTechniques ? `- Visual effects: ${patternData.characteristics.visualTechniques}` : ''}
+- Ensure pure, clean, valid Japanese text rendering.
 
 [CRITICAL QUALITY REQUIREMENTS]
 - Create as if this is taken from a professional YouTube channel
@@ -539,7 +560,7 @@ ${patternData?.characteristics?.visualTechniques ? `- Visual effects: ${patternD
 [VARIATION ${i + 1} of ${count}]
 ${i === 0 ? '- Standard composition from model image' : i === 1 ? '- Slightly more dynamic composition, vibrant colors' : '- Alternative angle or emphasis, maintain quality'}
 
-IMPORTANT: The person in the image must look exactly like the model image. The text styling must match the reference thumbnails' typography.`;
+IMPORTANT: The person in the image must look exactly like the model image (Age: ${patternData?.characteristics?.personAttributes?.ageGroup}). The text styling must match the reference thumbnails' typography.`;
 
             try {
                 if (referenceImages.length > 0) {
