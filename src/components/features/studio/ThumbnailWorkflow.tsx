@@ -107,7 +107,8 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                     res.data.patterns,
                     workflow.videoTitle,
                     workflow.videoDescription,
-                    urls // Pass all selected thumbnail URLs for reference
+                    urls, // Pass all selected thumbnail URLs for reference
+                    workflow.text // Pass input text for model generation
                 );
 
                 if (modelRes.logs) setWorkflow(prev => ({ ...prev, logs: [...prev.logs, ...modelRes.logs!] }));
@@ -253,15 +254,15 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 ))}
             </div>
 
-            {/* Step 1: Video Title */}
+            {/* Step 1: Video Title & Text */}
             {workflow.step === 1 && (
                 <Card>
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                             <Type className="w-5 h-5" />
-                            Step 1: 動画タイトル・内容を入力
+                            Step 1: 動画タイトル・サムネイル文言を入力
                         </CardTitle>
-                        <CardDescription>サムネイルを作成したい動画の情報を入力してください</CardDescription>
+                        <CardDescription>サムネイルを作成したい動画の情報と、サムネイルに入れたい文言を入力してください</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
                         <div className="space-y-2">
@@ -271,6 +272,16 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                                 onChange={(e) => setWorkflow(prev => ({ ...prev, videoTitle: e.target.value }))}
                                 placeholder="例：【衝撃】〇〇を試したら驚きの結果に..."
                             />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-semibold text-foreground">サムネイル文言（テロップ） <span className="text-red-500">*</span></label>
+                            <Textarea
+                                value={workflow.text}
+                                onChange={(e) => setWorkflow(prev => ({ ...prev, text: e.target.value }))}
+                                placeholder="例：衝撃、必見、〇〇の結果...（画像生成時に使用されます）"
+                                className="min-h-[80px] resize-none"
+                            />
+                            <p className="text-xs text-muted-foreground">※ここで入力した文言がStep 3のモデル画像生成時に反映されます</p>
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-muted-foreground">動画の概要（任意）</label>
@@ -284,7 +295,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                         <div className="flex justify-end pt-2">
                             <Button
                                 onClick={() => goToStep(2)}
-                                disabled={!workflow.videoTitle.trim()}
+                                disabled={!workflow.videoTitle.trim() || !workflow.text.trim()}
                             >
                                 次へ <ArrowRight className="w-4 h-4 ml-2" />
                             </Button>

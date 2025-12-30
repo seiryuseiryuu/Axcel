@@ -326,7 +326,8 @@ export async function generateModelImages(
     patterns: PatternCategory[],
     videoTitle: string,
     videoDescription?: string,
-    thumbnailUrls?: string[]
+    thumbnailUrls?: string[],
+    text?: string
 ): Promise<{ data?: ModelImageInfo[]; logs?: string[]; error?: string }> {
     await requireRole("student");
     const logs: string[] = [];
@@ -369,13 +370,22 @@ export async function generateModelImages(
                 referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
             }
 
-            // High quality prompt that emphasizes matching reference style
-            // DO NOT add any text unless specified
-            const promptForImage = `Create a YouTube thumbnail template image.
+            // High quality prompt that emphasizes matching reference style and INCLUDES text
+            const promptForImage = `Create a YouTube thumbnail image with text.
 
-[CRITICAL RULES]
-- DO NOT add ANY text, letters, words, or typography to the image
-- This is a TEMPLATE image - text will be added separately
+[MANDATORY - EXACT TEXT]
+The ONLY text on this thumbnail must be: "${text || videoTitle}"
+- IMPORTANT: Render the Japanese text "${text || videoTitle}" clearly and legibly.
+- Avoid broken characters or "alien" text. Use standard Japanese characters.
+- Text position: ${pattern.characteristics.textPosition}
+- Text Style: ${pattern.characteristics.textStyle}
+
+[TYPOGRAPHY REPRODUCTION]
+- Font Style: ${pattern.characteristics.textStyle}
+- Apply effects (outlines, shadows, gradients) as described in the style.
+- The text should look like a high-end professional design.
+
+[SPECIFICATIONS]
 - Match the EXACT visual style of the reference images provided
 
 [SPECIFICATIONS]
@@ -409,7 +419,11 @@ ${pattern.requiredMaterials?.props?.length ? `- Props: ${pattern.requiredMateria
 - 8K professional quality
 - Photorealistic
 - High contrast, vibrant colors
-- Clean composition without any text or watermarks`;
+- 8K professional quality
+- Photorealistic
+- High contrast, vibrant colors
+- Clean composition
+- The text must be legible and professional`;
 
             logs.push(`[Model Gen] '${pattern.name}' - ${referenceImages.length} refs loaded`);
 
