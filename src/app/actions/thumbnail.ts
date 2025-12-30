@@ -9,6 +9,7 @@ export interface PatternCategory {
     description: string;
     matchCount?: number;
     characteristics: {
+        subjectType: 'real_person' | 'illustration' | 'character' | 'none';
         textPosition: string;
         textStyle?: string;
         colorScheme: string;
@@ -259,6 +260,7 @@ ${JSON.stringify(individualAnalysis, null, 2)}
       "matchCount": 3,
       "exampleImageIndices": [1, 3, 5],
       "characteristics": {
+        "subjectType": "被写体の種類（real_person / illustration / character / none）",
         "textPosition": "具体的な位置とサイズ感",
         "textStyle": "【重要】フォント種別(ゴシック/明朝)、太さ(Heavy/Bold)、装飾(二重縁取り/ドロップシャドウ)、配色を詳細に記述。「インパクト重視」「可読性重視」などの意図も含める。",
         "colorScheme": "配色とムード",
@@ -381,13 +383,21 @@ export async function generateModelImages(
 - Style: ${pattern.name}
 - Color scheme: ${pattern.characteristics.colorScheme}
 
-[PERSON/SUBJECT]
+${pattern.characteristics.subjectType === 'real_person' ? `[PERSON/SUBJECT]
 - Position: ${pattern.characteristics.personPosition}
 - Expression: ${pattern.characteristics.personExpression || 'expressive, engaging'}
 - Age/Gender: ${pattern.characteristics.personAttributes?.ageGroup || 'Young'}, ${pattern.characteristics.personAttributes?.gender || 'Male'}
 - Looks: ${pattern.characteristics.personAttributes?.hairStyle || 'Black hair'}, ${pattern.characteristics.personAttributes?.clothing || 'Simple clothes'}
 ${pattern.characteristics.personAttributes?.distinctiveFeatures ? `- Features: ${pattern.characteristics.personAttributes.distinctiveFeatures}` : ''}
-- IMPORTANT: Reproduce the specific PERSON ATTRIBUTES above. Do not generate a generic older person if "Young" is specified.
+- IMPORTANT: Reproduce the specific PERSON ATTRIBUTES above. Do not generate a generic older person if "Young" is specified.` :
+                    pattern.characteristics.subjectType === 'illustration' || pattern.characteristics.subjectType === 'character' ? `[CHARACTER/ILLUSTRATION]
+- Type: Illustration / Anime Style Character
+- Position: ${pattern.characteristics.personPosition}
+- Description: ${pattern.characteristics.personExpression || 'Engaging character'}
+- Style: Matches the reference image style (e.g. flat illustration, anime, 3D render)` :
+                        `[SUBJECT/OBJECT]
+- No person. Focus on text and background graphics.
+- Main element: ${pattern.characteristics.layout}`}
 
 [LAYOUT & COMPOSITION]
 - Layout: ${pattern.characteristics.layout}
@@ -541,7 +551,7 @@ The ONLY text on this thumbnail must be: "${text}"
 - Pattern name: ${modelImage?.patternName || 'professional thumbnail'}
 - Use the model image as the primary visual base
 - Maintain the same person, pose, expression, lighting, and composition from the model
-- PERSON: ${patternData?.characteristics?.personAttributes?.ageGroup || ''} ${patternData?.characteristics?.personAttributes?.gender || ''} ${patternData?.characteristics?.personAttributes?.hairStyle || ''}
+${patternData?.characteristics?.subjectType === 'real_person' ? `- PERSON: ${patternData?.characteristics?.personAttributes?.ageGroup || ''} ${patternData?.characteristics?.personAttributes?.gender || ''}` : ''}
 - Color scheme: ${colorScheme}
 
 [SPECIFICATIONS]
@@ -560,7 +570,7 @@ ${patternData?.characteristics?.visualTechniques ? `- Visual effects: ${patternD
 [VARIATION ${i + 1} of ${count}]
 ${i === 0 ? '- Standard composition from model image' : i === 1 ? '- Slightly more dynamic composition, vibrant colors' : '- Alternative angle or emphasis, maintain quality'}
 
-IMPORTANT: The person in the image must look exactly like the model image (Age: ${patternData?.characteristics?.personAttributes?.ageGroup}). The text styling must match the reference thumbnails' typography.`;
+IMPORTANT: The visual style must match the model image. ${patternData?.characteristics?.subjectType === 'real_person' ? `The person in the image must look exactly like the model image (Age: ${patternData?.characteristics?.personAttributes?.ageGroup}).` : 'Maintain the illustration/graphic style of the model image.'} The text styling must match the reference thumbnails' typography.`;
 
             try {
                 if (referenceImages.length > 0) {
