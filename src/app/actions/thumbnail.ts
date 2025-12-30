@@ -106,10 +106,10 @@ export async function analyzePatterns(
 
 ${images.length}枚のYouTubeサムネイル画像を視覚的に詳細分析し、以下のJSON形式で出力してください。
 
-【分析の重点: テロップ、人物、そして「テンション感」】
-1. テロップと人物の位置関係を正確に記述してください（例: テロップが右上、人物が左下から見上げている）。
+【分析の重点: テロップの「フォント再現性」と「テンション感」】
+1. テロップのデザイン（フォントの種類、太さ、縁取り、装飾）を、デザイナーが再現できるレベルで詳細に記述してください。
 2. そのテロップの内容がどういう意図か（質問、煽り、事実提示など）を分析してください。
-3. 画像全体から伝わる「テンション感」（例: ハイテンション、シリアス、ほのぼの）を言語化してください。
+3. 画像全体から伝わる「テンション感」（例：ハイテンション、シリアス、ほのぼの）を言語化してください。
 
 以下のJSON形式で回答:
 {
@@ -119,19 +119,25 @@ ${images.length}枚のYouTubeサムネイル画像を視覚的に詳細分析し
       "title": "動画タイトル",
       "text": {
         "content": "テロップ内容",
-        "position": "配置（例: 画面上部80%を占有）",
-        "style": "デザイン（例: 金色の極太ゴシックに赤の境界線）",
-        "meaning": "内容の意図（例: 視聴者の不安を煽る問いかけ）"
+        "position": "配置（例：画面上部80%を占有）",
+        "style": "デザイン概要（例：金色の極太ゴシックに赤の境界線）",
+        "typography": {
+           "fontFamily": "フォント種別（例：極太ゴシック、明朝体、筆文字）",
+           "weight": "太さ（例：ExtraBold, Heavy）",
+           "effects": "装飾（例：二重縁取り、ドロップシャドウ、光彩、立体処理）",
+           "colors": "文字色と縁取り色の組み合わせ（例：文字は白、内枠は赤、外枠は黒）"
+        },
+        "meaning": "内容の意図"
       },
       "person": {
         "hasPerson": true,
-        "position": "配置（例: 左下）",
-        "expression": "表情（例: 口を大きく開けた驚きの表情）",
-        "relationToText": "テロップとの関係（例: テロップを指差して注目させている）"
+        "position": "配置",
+        "expression": "表情",
+        "relationToText": "テロップとの関係"
       },
       "vibe": {
-        "mood": "テンション感（例: 緊迫感のあるハイテンション）",
-        "colorScheme": "配色（例: 黒背景に赤と黄色）"
+        "mood": "テンション感",
+        "colorScheme": "配色"
       }
     }
   ]
@@ -145,18 +151,19 @@ ${thumbnailTitles.map((t, i) => `画像${i + 1}: ${t}`).join('\n')}
 
 【分析項目 - 各画像について以下を抽出】
 
-1. テロップ/テキスト分析
-   - 文字数・フォントスタイル（太字/細字）
-   - 配置位置（上部/中央/下部）
-   - 文字色・縁取りの有無
+1. テロップ/テキスト分析（詳細）
+   - フォントスタイル（ゴシック/明朝/手書き、太さ）
+   - 装飾（縁取り、影、立体感）
+   - 配色（文字色、枠色）
+   - 配置位置
 
 2. 配色・感情分析
    - 主要色（最大3色）
-   - 配色の意図（例：赤黒=危機感）
-   
+   - 配色の意図
+
 3. 構図・レイアウト
-   - 分割パターン（単一/2分割/3分割）
-   - 視線誘導の仕掛け
+   - 分割パターン
+   - 視線誘導
 
 4. 人物・オブジェクト
    - 人物の有無と表情
@@ -172,11 +179,14 @@ ${thumbnailTitles.map((t, i) => `画像${i + 1}: ${t}`).join('\n')}
         "hasText": true,
         "content": "テロップ内容",
         "position": "中央上部",
-        "color": "#FFFFFF"
+        "style": "極太ゴシック・赤縁取り",
+        "typography": {
+            "fontFamily": "ゴシック",
+            "effects": "赤縁取り"
+        }
       },
       "color": {
         "primary": "#FF0000",
-        "secondary": "#000000",
         "mood": "危機感"
       },
       "composition": {
@@ -230,8 +240,8 @@ ${JSON.stringify(individualAnalysis, null, 2)}
 【必須要件】
 1. **2つ、または3つのパターンのみ**を出力してください。
 2. 各パターンについて「テロップの配置」「テンション感」「人物とテロップの関係性」を詳細に定義してください。
-3. **必要素材（requiredMaterials）**: そのパターンを再現するために必要な素材を具体的に記述してください。
-4. **該当画像番号（exampleImageIndices）**: どの画像がこのパターンに該当するかを配列で記述してください。
+3. **Typography (超重要)**: フォントの種類、太さ、縁取り（二重枠など）、色使いについて、デザイナーへの指示レベルで具体的に記述してください。
+4. **該当画像番号**: どの画像がこのパターンに該当するか記述。
 
 【出力形式】
 {
@@ -243,18 +253,18 @@ ${JSON.stringify(individualAnalysis, null, 2)}
       "exampleImageIndices": [1, 3, 5],
       "characteristics": {
         "textPosition": "具体的な位置とサイズ感",
-        "textStyle": "フォント・色・装飾の詳細",
+        "textStyle": "【重要】フォント種別(ゴシック/明朝)、太さ(Heavy/Bold)、装飾(二重縁取り/ドロップシャドウ)、配色を詳細に記述。「インパクト重視」「可読性重視」などの意図も含める。",
         "colorScheme": "配色とムード",
-        "colorMood": "詳細なテンション感（例：緊迫したハイテンション）",
-        "personPosition": "人物配置とテロップとの距離感",
-        "personExpression": "表情・視線・ジェスチャー",
-        "layout": "構図（例：対角線構図）",
-        "visualTechniques": "視線誘導、エフェクトの具体例"
+        "colorMood": "詳細なテンション感",
+        "personPosition": "人物配置",
+        "personExpression": "表情",
+        "layout": "構図",
+        "visualTechniques": "視線誘導、エフェクト"
       },
       "requiredMaterials": {
-        "background": "必要な背景（例：暗いグラデーション、都市風景ぼかし）",
-        "person": "必要な人物素材（例：驚いた表情の上半身、カメラ目線）",
-        "props": ["追加オブジェクト1", "追加オブジェクト2"]
+        "background": "背景詳細",
+        "person": "人物詳細",
+        "props": ["小物"]
       },
       "designRules": [
         "ルール1: 人物の視線は必ずテロップに向ける",
@@ -262,7 +272,7 @@ ${JSON.stringify(individualAnalysis, null, 2)}
       ]
     }
   ],
-  "summary": "全体の傾向まとめ（50文字以内）"
+  "summary": "全体の傾向まとめ"
 }`;
 
         logs.push(`[Stage 2] Starting Pattern Extraction.`);
@@ -492,9 +502,16 @@ export async function generateFinalThumbnails(
 [MANDATORY - EXACT TEXT]
 The ONLY text on this thumbnail must be: "${text}"
 - DO NOT add any other text, labels, watermarks, or typography
-- Text must be large, bold, and highly readable
-- Font style: ${textStyle}
 - Text position: prominent center or upper area, maximum visibility
+
+[TYPOGRAPHY REPRODUCTION (CRITICAL)]
+- Font Style Description: ${textStyle}
+- YOU MUST REPRODUCE THE EXACT TYPOGRAPHY STYLE described above.
+- If the style mentions "Gothic" (ゴシック), use a heavy, blocky sans-serif font.
+- If the style mentions "Mincho" (明朝), use a sharp, high-contrast serif font.
+- If the style mentions "Brush" (筆文字), use a dynamic calligraphy style.
+- Apply effects (heavy strokes, multiple outlines, drop shadows, gradients) EXACTLY as described.
+- The text should look like a high-end design element, not just plain text overlay.
 
 [STYLE REFERENCE]
 - Pattern name: ${modelImage?.patternName || 'professional thumbnail'}
@@ -517,7 +534,7 @@ ${patternData?.characteristics?.visualTechniques ? `- Visual effects: ${patternD
 [VARIATION ${i + 1} of ${count}]
 ${i === 0 ? '- Standard composition from model image' : i === 1 ? '- Slightly more dynamic composition, vibrant colors' : '- Alternative angle or emphasis, maintain quality'}
 
-IMPORTANT: The person in the image must look exactly like the model image. The text styling must match the reference thumbnails.`;
+IMPORTANT: The person in the image must look exactly like the model image. The text styling must match the reference thumbnails' typography.`;
 
             let imageUrl: string;
             if (referenceImages.length > 0) {
