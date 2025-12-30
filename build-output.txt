@@ -1,0 +1,487 @@
+﻿
+> skillplus@0.1.0 build
+> next build
+
+   笆ｲ Next.js 16.0.7 (Turbopack)
+node.exe :  笞 The "m
+iddleware" file conve
+ntion is deprecated. 
+Please use "proxy" in
+stead. Learn more: ht
+tps://nextjs.org/docs
+/messages/middleware-
+to-proxy
+発生場所 行:1 文字:1
++ & "C:\Program Files
+\nodejs/node.exe" "C:
+\Program Files\nodejs
+/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: ( 笞 The   
+  "middle...lewar    
+e-to-proxy:Strin    g
+) [], RemoteExc    ep
+tion
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+   - Environments: .env.local
+
+   Creating an optimized production build ...
+
+> Build error occurre
+d
+Error: Turbopack buil
+d failed with 2 error
+s:
+./src/app/(admin)/ins
+tructors/page.tsx:10:
+1
+Module not found: Can
+'t resolve '@/compone
+nts/ui/dialog'
+[0m [90m  8 |[39m 
+[36mimport[39m { [
+33mPlus[39m[33m,[3
+9m [33mSearch[39m[
+33m,[39m [33mLoader
+2[39m } [36mfrom[3
+9m [32m"lucide-react
+"[39m[33m;[39m
+ [90m  9 |[39m [36
+mimport[39m { create
+User } [36mfrom[39m
+ [32m"@/app/actions/
+admin-users"[39m[33
+m;[39m
+[31m[1m>[22m[39m
+[90m 10 |[39m [36mi
+mport[39m { [33mDia
+log[39m[33m,[39m 
+[33mDialogContent[39
+m[33m,[39m [33mDia
+logDescription[39m[
+33m,[39m [33mDialog
+Footer[39m[33m,[39
+m [33mDialogHeader[
+39m[33m,[39m [33mD
+ialogTitle[39m[33m,
+[39m [33mDialogTrig
+ger[39m } [36mfrom
+[39m [32m"@/componen
+ts/ui/dialog"[39m[3
+3m;[39m
+ [90m    |[39m [31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m
+ [90m 11 |[39m [36
+mimport[39m { [33mL
+abel[39m } [36mfrom
+[39m [32m"@/compone
+nts/ui/label"[39m[3
+3m;[39m
+ [90m 12 |[39m
+ [90m 13 |[39m [36
+mexport[39m [36mdef
+ault[39m [36mfuncti
+on[39m [33mInstruct
+orsPage[39m() {[0m
+
+Import map: aliased t
+o relative './src/com
+ponents/ui/dialog' in
+side of [project]/
+
+
+Import traces:
+  Client Component Br
+owser:
+    ./src/app/(admin)
+/instructors/page.tsx
+ [Client Component Br
+owser]
+    ./src/app/(admin)
+/instructors/page.tsx
+ [Server Component]
+
+  Client Component SS
+R:
+    ./src/app/(admin)
+/instructors/page.tsx
+ [Client Component SS
+R]
+    ./src/app/(admin)
+/instructors/page.tsx
+ [Server Component]
+
+https://nextjs.org/do
+cs/messages/module-no
+t-found
+
+
+./src/app/(admin)/stu
+dents/page.tsx:10:1
+Module not found: Can
+'t resolve '@/compone
+nts/ui/dialog'
+[0m [90m  8 |[39m 
+[36mimport[39m { [
+33mPlus[39m[33m,[3
+9m [33mSearch[39m[
+33m,[39m [33mLoader
+2[39m } [36mfrom[3
+9m [32m"lucide-react
+"[39m[33m;[39m
+ [90m  9 |[39m [36
+mimport[39m { create
+User } [36mfrom[39m
+ [32m"@/app/actions/
+admin-users"[39m[33
+m;[39m
+[31m[1m>[22m[39m
+[90m 10 |[39m [36mi
+mport[39m { [33mDia
+log[39m[33m,[39m 
+[33mDialogContent[39
+m[33m,[39m [33mDia
+logDescription[39m[
+33m,[39m [33mDialog
+Footer[39m[33m,[39
+m [33mDialogHeader[
+39m[33m,[39m [33mD
+ialogTitle[39m[33m,
+[39m [33mDialogTrig
+ger[39m } [36mfrom
+[39m [32m"@/componen
+ts/ui/dialog"[39m[3
+3m;[39m
+ [90m    |[39m [31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m[31m[1m^[22m
+[39m[31m[1m^[22m[
+39m[31m[1m^[22m[3
+9m[31m[1m^[22m[39
+m[31m[1m^[22m[39m
+[31m[1m^[22m[39m
+[31m[1m^[22m[39m[
+31m[1m^[22m[39m[3
+1m[1m^[22m[39m[31
+m[1m^[22m[39m[31m
+[1m^[22m[39m[31m
+[1m^[22m[39m[31m[
+1m^[22m[39m[31m[1
+m^[22m[39m[31m[1m
+^[22m[39m[31m[1m^
+[22m[39m[31m[1m^
+[22m[39m[31m[1m^[
+22m[39m[31m[1m^[2
+2m[39m[31m[1m^[22
+m[39m[31m[1m^[22m
+[39m
+ [90m 11 |[39m [36
+mimport[39m { [33mL
+abel[39m } [36mfrom
+[39m [32m"@/compone
+nts/ui/label"[39m[3
+3m;[39m
+ [90m 12 |[39m [36
+mimport[39m { useToa
+st } [36mfrom[39m 
+[32m"@/components/ui/
+toast"[39m [90m// N
+ote: Need to verify i
+f this exists or use 
+simple alert[39m
+ [90m 13 |[39m[0m
+
+Import map: aliased t
+o relative './src/com
+ponents/ui/dialog' in
+side of [project]/
+
+
+Import traces:
+  Client Component Br
+owser:
+    ./src/app/(admin)
+/students/page.tsx [C
+lient Component Brows
+er]
+    ./src/app/(admin)
+/students/page.tsx [S
+erver Component]
+
+  Client Component SS
+R:
+    ./src/app/(admin)
+/students/page.tsx [C
+lient Component SSR]
+    ./src/app/(admin)
+/students/page.tsx [S
+erver Component]
+
+https://nextjs.org/do
+cs/messages/module-no
+t-found
+
+
+    at <unknown> (./s
+rc/app/(admin)/instru
+ctors/page.tsx:10:1)
+    at <unknown> (htt
+ps://nextjs.org/docs/
+messages/module-not-f
+ound)
+    at <unknown> (./s
+rc/app/(admin)/studen
+ts/page.tsx:10:1)
+    at <unknown> (htt
+ps://nextjs.org/docs/
+messages/module-not-f
+ound)

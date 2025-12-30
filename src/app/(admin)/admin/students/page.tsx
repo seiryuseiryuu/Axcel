@@ -10,6 +10,37 @@ import {
 } from "@/components/ui/table";
 import { requirePermission } from "@/lib/rbac";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Sparkles } from "lucide-react";
+
+// Helper function to format studio access status
+function getStudioStatus(studioEnabled: boolean, expiresAt: string | null) {
+    if (!studioEnabled) {
+        return { label: "無効", variant: "outline" as const };
+    }
+
+    if (!expiresAt) {
+        return { label: "無期限", variant: "default" as const };
+    }
+
+    const expDate = new Date(expiresAt);
+    const now = new Date();
+
+    if (expDate < now) {
+        return { label: "期限切れ", variant: "destructive" as const };
+    }
+
+    const daysRemaining = Math.ceil((expDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysRemaining <= 7) {
+        return { label: `残り${daysRemaining}日`, variant: "destructive" as const };
+    } else if (daysRemaining <= 30) {
+        return { label: `残り${daysRemaining}日`, variant: "secondary" as const };
+    }
+
+    return { label: `${expDate.toLocaleDateString()}まで`, variant: "default" as const };
+}
 
 export default async function StudentsPage() {
     const user = await requirePermission("canAccessAdminPanel");
@@ -20,7 +51,7 @@ export default async function StudentsPage() {
     // If Admin -> fetch all students
     // If Instructor -> fetch students enrolled in my courses
 
-    let students = [];
+    let students: any[] = [];
 
     if (user.role === 'admin') {
         const { data } = await supabase
@@ -53,7 +84,7 @@ export default async function StudentsPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Students</h1>
                     <p className="text-muted-foreground">
-                        Manage your students and their enrollment status.
+                        Manage your students and their AI Studio access.
                     </p>
                 </div>
                 <CreateStudentSheet />
@@ -64,6 +95,12 @@ export default async function StudentsPage() {
                     <TableHeader>
                         <TableRow>
                             <TableHead>Student</TableHead>
+                            <TableHead>
+                                <span className="flex items-center gap-1">
+                                    <Sparkles className="h-3 w-3" />
+                                    AI Studio
+                                </span>
+                            </TableHead>
                             <TableHead>Joined</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
@@ -71,33 +108,42 @@ export default async function StudentsPage() {
                     <TableBody>
                         {students.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={3} className="text-center h-24 text-muted-foreground">
+                                <TableCell colSpan={4} className="text-center h-24 text-muted-foreground">
                                     No students found.
                                 </TableCell>
                             </TableRow>
                         )}
-                        {students.map((student) => (
-                            <TableRow key={student.id}>
-                                <TableCell className="font-medium">
-                                    <div className="flex items-center gap-3">
-                                        <Avatar className="h-8 w-8">
-                                            <AvatarImage src={student.avatar_url || ""} />
-                                            <AvatarFallback>{student.display_name?.substring(0, 2).toUpperCase()}</AvatarFallback>
-                                        </Avatar>
-                                        {student.display_name}
-                                    </div>
-                                </TableCell>
-                                <TableCell>{new Date(student.created_at).toLocaleDateString()}</TableCell>
-                                <TableCell className="text-right">
-                                    <Button variant="ghost" size="sm">Details</Button>
-                                </TableCell>
-                            </TableRow>
-                        ))}
+                        {students.map((student) => {
+                            const studioStatus = getStudioStatus(
+                                student.studio_enabled || false,
+                                student.studio_expires_at
+                            );
+                            return (
+                                <TableRow key={student.id}>
+                                    <TableCell className="font-medium">
+                                        <div className="flex items-center gap-3">
+                                            <Avatar className="h-8 w-8">
+                                                <AvatarImage src={student.avatar_url || ""} />
+                                                <AvatarFallback>{student.display_name?.substring(0, 2).toUpperCase()}</AvatarFallback>
+                                            </Avatar>
+                                            {student.display_name}
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge variant={studioStatus.variant}>
+                                            {studioStatus.label}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell>{new Date(student.created_at).toLocaleDateString()}</TableCell>
+                                    <TableCell className="text-right">
+                                        <Button variant="ghost" size="sm">Details</Button>
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
                     </TableBody>
                 </Table>
             </div>
         </div>
     );
 }
-// Helper component for client actions (not used properly above due to SC limitations, but good enough for now)
-import { Button } from "@/components/ui/button";

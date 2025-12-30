@@ -8,6 +8,7 @@ const createStudentSchema = z.object({
     password: z.string().min(8),
     displayName: z.string().min(2),
     courseIds: z.array(z.string().uuid()).optional(),
+    studioMonths: z.string().optional(),  // "0", "1", "3", "6", "12", "unlimited"
 });
 
 export async function POST(request: NextRequest) {
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { email, password, displayName, courseIds } = result.data;
+        const { email, password, displayName, courseIds, studioMonths } = result.data;
 
         const supabaseAdmin = createAdminClient();
 
@@ -57,6 +58,21 @@ export async function POST(request: NextRequest) {
 
         const userId = authData.user.id;
 
+        // Calculate studio expiration date
+        let studioEnabled = false;
+        let studioExpiresAt: string | null = null;
+
+        if (studioMonths && studioMonths !== "0") {
+            studioEnabled = true;
+            if (studioMonths !== "unlimited") {
+                const months = parseInt(studioMonths, 10);
+                const expDate = new Date();
+                expDate.setMonth(expDate.getMonth() + months);
+                studioExpiresAt = expDate.toISOString();
+            }
+            // unlimited = null expiration (no limit)
+        }
+
         // 3. Create profile (Trigger might handle this, or manual?)
         // If we have a trigger on auth.users insert -> profiles, we rely on it.
         // But usually we want to set role explicitly.
@@ -67,6 +83,8 @@ export async function POST(request: NextRequest) {
                 id: userId,
                 role: 'student',
                 display_name: displayName,
+                studio_enabled: studioEnabled,
+                studio_expires_at: studioExpiresAt,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             });
@@ -106,7 +124,13 @@ export async function POST(request: NextRequest) {
             action: 'create_student',
             target_type: 'user',
             target_id: userId,
-            details: { email, displayName, courseIds },
+            details: {
+                email,
+                displayName,
+                courseIds,
+                studioEnabled,
+                studioExpiresAt,
+            },
             created_at: new Date().toISOString(),
         });
 

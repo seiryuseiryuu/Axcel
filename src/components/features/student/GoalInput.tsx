@@ -6,8 +6,7 @@ import { Sparkles, ArrowRight, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { createStudyPlan } from "@/app/actions/planner";
-import { useToast } from "@/components/ui/use-toast"; // Assuming this exists or using simple alert
+import { createMetaCurriculum } from "@/app/actions/planner";
 
 export function GoalInput() {
     const [goal, setGoal] = useState("");
@@ -20,7 +19,7 @@ export function GoalInput() {
 
         setIsSubmitting(true);
         try {
-            await createStudyPlan(goal);
+            await createMetaCurriculum(goal);
         } catch (error) {
             console.error(error);
             alert("プラン作成に失敗しました");

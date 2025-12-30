@@ -10,8 +10,22 @@ export interface AuthUser {
     displayName: string;
 }
 
+// Development bypass user (only in development)
+const DEV_USER: AuthUser = {
+    id: 'dev-user-id',
+    email: 'dev@localhost',
+    role: 'admin',
+    profileId: 'dev-profile-id',
+    displayName: 'Developer',
+};
+
 // Get current authenticated user with profile
 export async function getAuthUser(): Promise<AuthUser | null> {
+    // DEV BYPASS: Skip auth in development mode
+    if (process.env.NODE_ENV === 'development' && process.env.DEV_BYPASS_AUTH === 'true') {
+        return DEV_USER;
+    }
+
     const supabase = await createClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -27,6 +41,16 @@ export async function getAuthUser(): Promise<AuthUser | null> {
         .single();
 
     if (profileError || !profile) {
+        // If profile doesn't exist, create a default one for dev
+        if (process.env.NODE_ENV === 'development') {
+            return {
+                id: user.id,
+                email: user.email!,
+                role: 'admin', // Default to admin in dev
+                profileId: user.id,
+                displayName: user.email?.split('@')[0] || 'User',
+            };
+        }
         return null;
     }
 

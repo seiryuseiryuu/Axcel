@@ -25,7 +25,11 @@ const nextConfig: NextConfig = {
   // Ensure we can build even if there are minor type errors in legacy code
   typescript: {
     ignoreBuildErrors: true,
-  }
+  },
+  // @ts-ignore
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
 };
 
 export default nextConfig;

@@ -13,9 +13,25 @@ import {
     SheetTitle,
     SheetTrigger,
 } from "@/components/ui/sheet";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
-// import { MultiSelect } from "@/components/ui/multi-select"; // If we have one, otherwise standard select or just skip course selection for now
+import { Plus, Sparkles } from "lucide-react";
+
+// Studio subscription options
+const STUDIO_DURATION_OPTIONS = [
+    { value: "0", label: "無効（Studioアクセスなし）" },
+    { value: "1", label: "1ヶ月" },
+    { value: "3", label: "3ヶ月" },
+    { value: "6", label: "6ヶ月" },
+    { value: "12", label: "12ヶ月" },
+    { value: "unlimited", label: "無期限" },
+];
 
 export function CreateStudentSheet({ availableCourses }: { availableCourses?: { id: string; title: string }[] }) {
     const [open, setOpen] = useState(false);
@@ -24,7 +40,7 @@ export function CreateStudentSheet({ availableCourses }: { availableCourses?: { 
         email: "",
         password: "",
         displayName: "",
-        // courseIds: [], // Implement course selection later or use simple comma separated?
+        studioMonths: "0",  // Default: no studio access
     });
     const router = useRouter();
 
@@ -46,7 +62,7 @@ export function CreateStudentSheet({ availableCourses }: { availableCourses?: { 
 
             setOpen(false);
             router.refresh();
-            setFormData({ email: "", password: "", displayName: "" });
+            setFormData({ email: "", password: "", displayName: "", studioMonths: "0" });
         } catch (error: any) {
             alert(error.message);
         } finally {
@@ -67,7 +83,7 @@ export function CreateStudentSheet({ availableCourses }: { availableCourses?: { 
                     <SheetHeader>
                         <SheetTitle>Add Student</SheetTitle>
                         <SheetDescription>
-                            Create a new student account. You can assign courses later.
+                            Create a new student account with AI Studio access settings.
                         </SheetDescription>
                     </SheetHeader>
                     <div className="grid gap-4 py-4">
@@ -107,6 +123,34 @@ export function CreateStudentSheet({ availableCourses }: { availableCourses?: { 
                                 }
                             />
                         </div>
+
+                        {/* AI Studio Access Duration */}
+                        <div className="grid gap-2 pt-4 border-t">
+                            <Label htmlFor="studioMonths" className="flex items-center gap-2">
+                                <Sparkles className="h-4 w-4 text-primary" />
+                                AI Studio 利用期間
+                            </Label>
+                            <Select
+                                value={formData.studioMonths}
+                                onValueChange={(value) =>
+                                    setFormData({ ...formData, studioMonths: value })
+                                }
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="利用期間を選択" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {STUDIO_DURATION_OPTIONS.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                                サムネイル作成・SEO記事作成・動画台本作成の3ツールが利用可能
+                            </p>
+                        </div>
                     </div>
                     <SheetFooter>
                         <Button type="submit" disabled={loading}>
@@ -118,3 +162,4 @@ export function CreateStudentSheet({ availableCourses }: { availableCourses?: { 
         </Sheet>
     );
 }
+

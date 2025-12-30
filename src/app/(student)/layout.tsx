@@ -1,4 +1,5 @@
-import { Sidebar, MobileSidebar } from "@/components/layout/sidebar";
+// Simplified layout for AI Studio focus
+export const maxDuration = 60; // Set Vercel Function timeout to 60s (Hobby Limit)
 
 export default function StudentLayout({
     children,
@@ -6,15 +7,10 @@ export default function StudentLayout({
     children: React.ReactNode;
 }) {
     return (
-        <div className="h-full relative font-body">
-            <div className="hidden h-full md:flex md:w-72 md:flex-col md:fixed md:inset-y-0 z-[80] bg-background border-r border-border">
-                <Sidebar role="student" />
-            </div>
-            <main className="md:pl-72 h-full">
-                <div className="flex items-center p-4 md:hidden">
-                    <MobileSidebar role="student" />
-                </div>
-                <div className="p-4 md:p-8 h-full bg-background">
+        <div className="h-full relative font-body bg-background text-foreground">
+            {/* Full width content, no global sidebar */}
+            <main className="h-full w-full">
+                <div className="h-full">
                     {children}
                 </div>
             </main>

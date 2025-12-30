@@ -4,6 +4,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { ThemeCustomizer } from "@/components/ui/ThemeCustomizer";
+import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -58,6 +59,7 @@ export default function RootLayout({
           <div className="fixed bottom-4 left-4 z-50">
             <ThemeCustomizer />
           </div>
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>
