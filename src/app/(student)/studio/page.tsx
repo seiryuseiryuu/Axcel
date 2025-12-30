@@ -1,5 +1,8 @@
 "use client";
 
+// Allow longer generation times for AI content (60 seconds)
+export const maxDuration = 60;
+
 import { useState, useTransition, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

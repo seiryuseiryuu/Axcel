@@ -470,8 +470,6 @@ export async function generateFinalThumbnails(
     }
 
     try {
-        const images: string[] = [];
-
         // Fetch reference images if provided
         let referenceImages: { mimeType: string; data: string }[] = [];
         if (referenceUrls && referenceUrls.length > 0) {
@@ -495,7 +493,8 @@ export async function generateFinalThumbnails(
         const textStyle = patternData?.characteristics?.textStyle || "bold white with black outline";
         const colorScheme = patternData?.characteristics?.colorScheme || "high contrast";
 
-        for (let i = 0; i < count; i++) {
+        // Generate images in parallel
+        const promises = Array.from({ length: count }).map(async (_, i) => {
             // Enhanced prompt that emphasizes using the model image as base
             const variationPrompt = `[TASK]: Create a final YouTube thumbnail by combining the model image with text overlay.
 
@@ -536,15 +535,25 @@ ${i === 0 ? '- Standard composition from model image' : i === 1 ? '- Slightly mo
 
 IMPORTANT: The person in the image must look exactly like the model image. The text styling must match the reference thumbnails' typography.`;
 
-            let imageUrl: string;
-            if (referenceImages.length > 0) {
-                // Use multimodal generation with reference images
-                const { generateImageWithReference } = await import("@/lib/gemini");
-                imageUrl = await generateImageWithReference(variationPrompt, referenceImages);
-            } else {
-                imageUrl = await generateThumbnailImage(variationPrompt);
+            try {
+                if (referenceImages.length > 0) {
+                    const { generateImageWithReference } = await import("@/lib/gemini");
+                    return await generateImageWithReference(variationPrompt, referenceImages);
+                } else {
+                    return await generateThumbnailImage(variationPrompt);
+                }
+            } catch (e: any) {
+                console.error(`Generation failed for variation ${i}:`, e);
+                // Return placeholder or null on failure, but filter later
+                return null;
             }
-            images.push(imageUrl);
+        });
+
+        const results = await Promise.all(promises);
+        const images = results.filter(Boolean) as string[];
+
+        if (images.length === 0) {
+            throw new Error("すべての画像生成に失敗しました。時間をおいて再度お試しください。");
         }
 
         return { data: images };
