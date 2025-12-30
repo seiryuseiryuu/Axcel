@@ -66,7 +66,9 @@ export class GeminiProvider implements AIProvider {
     }
 
     async generateImage(prompt: string): Promise<string> {
-        throw new Error("Gemini Image Generation not implemented in this provider version.");
+        // Use the implementation from lib/gemini which supports Gemini 3 Imgen
+        const { generateImage } = await import("@/lib/gemini");
+        return generateImage(prompt);
     }
 }
 
