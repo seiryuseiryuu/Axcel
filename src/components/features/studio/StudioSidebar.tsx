@@ -5,12 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
     BookText, Video, Image, Cpu, ImagePlus, FileVideo,
     Twitter, Instagram, Presentation, MessageSquare, FileText,
     Mail, Layout, MonitorPlay, Package, GitBranch, Scissors,
-    ChevronLeft, ChevronRight, Palette, Sparkles
+    ChevronLeft, ChevronRight, Palette, Sparkles, Users
 } from "lucide-react";
 
 interface ToolItem {
@@ -18,50 +19,53 @@ interface ToolItem {
     href: string;
     icon: React.ComponentType<{ className?: string }>;
     category: string;
+    comingSoon?: boolean;
 }
 
 const tools: ToolItem[] = [
     // Content Tools
     { title: "SEO記事作成", href: "/admin/studio/seo", icon: BookText, category: "content" },
     { title: "YouTube台本", href: "/admin/studio/script", icon: Video, category: "content" },
-    { title: "ショート動画台本", href: "/admin/studio/short-script", icon: FileVideo, category: "content" },
-    { title: "動画切り抜き分析", href: "/admin/studio/video-clip", icon: Scissors, category: "content" },
-    { title: "X・Threads投稿", href: "/admin/studio/social-post", icon: Twitter, category: "content" },
-    { title: "note文章", href: "/admin/studio/note-writing", icon: FileText, category: "content" },
-    { title: "プレゼン資料", href: "/admin/studio/presentation", icon: Presentation, category: "content" },
+    { title: "ショート動画台本", href: "/admin/studio/short-script", icon: FileVideo, category: "content", comingSoon: true },
+    { title: "X・Threads投稿", href: "/admin/studio/social-post", icon: Twitter, category: "content", comingSoon: true },
+    { title: "note文章", href: "/admin/studio/note-writing", icon: FileText, category: "content", comingSoon: true },
 
     // Image Tools
     { title: "YouTubeサムネイル", href: "/admin/studio/thumbnail", icon: Image, category: "image" },
-    { title: "ブログアイキャッチ", href: "/admin/studio/eyecatch", icon: ImagePlus, category: "image" },
-    { title: "インスタストーリーズ", href: "/admin/studio/insta-story", icon: Instagram, category: "image" },
-    { title: "LINEバナー", href: "/admin/studio/line-banner", icon: MessageSquare, category: "image" },
-    { title: "note/Brain/Tips", href: "/admin/studio/note-thumbnail", icon: FileText, category: "image" },
+    { title: "ブログアイキャッチ", href: "/admin/studio/eyecatch", icon: ImagePlus, category: "image", comingSoon: true },
+    { title: "インスタストーリーズ", href: "/admin/studio/insta-story", icon: Instagram, category: "image", comingSoon: true },
+    { title: "LINEバナー", href: "/admin/studio/line-banner", icon: MessageSquare, category: "image", comingSoon: true },
+    { title: "note/Brain/Tips", href: "/admin/studio/note-thumbnail", icon: FileText, category: "image", comingSoon: true },
 
     // Copywriting Tools
-    { title: "セールスレター", href: "/admin/studio/sales-letter", icon: Mail, category: "copy" },
-    { title: "LPライティング", href: "/admin/studio/lp-writing", icon: Layout, category: "copy" },
-    { title: "VSLライティング", href: "/admin/studio/vsl-writing", icon: MonitorPlay, category: "copy" },
-
     // Strategy Tools
-    { title: "商品設計", href: "/admin/studio/product-design", icon: Package, category: "strategy" },
-    { title: "ファネル設計", href: "/admin/studio/funnel-design", icon: GitBranch, category: "strategy" },
-    { title: "カリキュラム作成", href: "/admin/studio/curriculum", icon: Cpu, category: "strategy" },
+
+    // Admin Tools
+    { title: "ユーザー管理", href: "/admin/users", icon: Users, category: "admin" },
 ];
 
 const categories = [
     { id: "content", label: "コンテンツ作成", icon: FileText },
     { id: "image", label: "画像作成", icon: Image },
-    { id: "copy", label: "コピーライティング", icon: Mail },
-    { id: "strategy", label: "戦略設計", icon: Package },
+    { id: "admin", label: "管理機能", icon: Users },
 ];
 
 export function StudioSidebar() {
     const pathname = usePathname();
+    const { toast } = useToast();
     const [collapsed, setCollapsed] = useState(false);
+
+    const handleComingSoon = (e: React.MouseEvent, title: string) => {
+        e.preventDefault();
+        toast({
+            title: "準備中",
+            description: `${title}機能は現在開発中です。リリースまでお待ちください。`,
+        });
+    };
 
     return (
         <div className={cn(
-            "border-r bg-card/50 flex flex-col transition-all duration-300",
+            "border-r bg-card/50 flex flex-col transition-all duration-300 h-screen sticky top-0",
             collapsed ? "w-16" : "w-64"
         )}>
             {/* Header */}
@@ -69,7 +73,7 @@ export function StudioSidebar() {
                 {!collapsed && (
                     <div className="flex items-center gap-2">
                         <Palette className="h-5 w-5 text-primary" />
-                        <span className="font-bold">AI Studio</span>
+                        <span className="font-bold">Accel</span>
                     </div>
                 )}
                 <Button
@@ -109,20 +113,44 @@ export function StudioSidebar() {
                                 {tools.filter(t => t.category === category.id).map((tool) => {
                                     const isActive = pathname === tool.href;
                                     return (
-                                        <Link href={tool.href} key={tool.href}>
-                                            <Button
-                                                variant={isActive ? "secondary" : "ghost"}
-                                                className={cn(
-                                                    "w-full justify-start h-9 text-sm",
-                                                    collapsed && "justify-center px-2",
-                                                    isActive && "bg-primary/10 text-primary"
-                                                )}
-                                                title={collapsed ? tool.title : undefined}
-                                            >
-                                                <tool.icon className="h-4 w-4 flex-shrink-0" />
-                                                {!collapsed && <span className="ml-2 truncate">{tool.title}</span>}
-                                            </Button>
-                                        </Link>
+                                        <div key={tool.href}>
+                                            {tool.comingSoon ? (
+                                                <Button
+                                                    variant="ghost"
+                                                    className={cn(
+                                                        "w-full justify-start h-9 text-sm text-muted-foreground hover:text-foreground",
+                                                        collapsed && "justify-center px-2"
+                                                    )}
+                                                    onClick={(e) => handleComingSoon(e, tool.title)}
+                                                    title={collapsed ? tool.title : undefined}
+                                                >
+                                                    <tool.icon className="h-4 w-4 flex-shrink-0" />
+                                                    {!collapsed && (
+                                                        <>
+                                                            <span className="ml-2 truncate">{tool.title}</span>
+                                                            <span className="ml-auto text-[10px] bg-muted-foreground/20 px-1.5 py-0.5 rounded text-muted-foreground">
+                                                                Soon
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            ) : (
+                                                <Link href={tool.href}>
+                                                    <Button
+                                                        variant={isActive ? "secondary" : "ghost"}
+                                                        className={cn(
+                                                            "w-full justify-start h-9 text-sm",
+                                                            collapsed && "justify-center px-2",
+                                                            isActive && "bg-primary/10 text-primary"
+                                                        )}
+                                                        title={collapsed ? tool.title : undefined}
+                                                    >
+                                                        <tool.icon className="h-4 w-4 flex-shrink-0" />
+                                                        {!collapsed && <span className="ml-2 truncate">{tool.title}</span>}
+                                                    </Button>
+                                                </Link>
+                                            )}
+                                        </div>
                                     );
                                 })}
                             </div>

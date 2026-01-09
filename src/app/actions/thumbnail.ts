@@ -382,60 +382,61 @@ export async function generateModelImages(
                 referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
             }
 
-            // High quality prompt that emphasizes matching reference style and INCLUDES text
+            // MODEL IMAGE: Include text with font reproduction
             const promptForImage = `Create a YouTube thumbnail image with text.
 
-[MANDATORY - EXACT TEXT]
-The ONLY text on this thumbnail must be: "${text || videoTitle}"
-- IMPORTANT: Render the Japanese text "${text || videoTitle}" clearly and legibly.
-- Avoid broken characters or "alien" text. Use standard Japanese characters.
+[TEXT - EXACT REPRODUCTION]
+- Text to render: "${text || videoTitle}"
+- Reproduce the EXACT font style from reference images
+- If reference uses Gothic (ゴシック): heavy sans-serif, blocky
+- If reference uses Mincho (明朝): sharp serif with contrast  
+- If reference uses Brush (筆文字): dynamic calligraphy
+- Copy text effects: outlines, shadows, gradients exactly from reference
 - Text position: ${pattern.characteristics.textPosition}
-- Text Style: ${pattern.characteristics.textStyle}
+- Font style: ${pattern.characteristics.textStyle}
 
-[TYPOGRAPHY REPRODUCTION]
-- Font Style: ${pattern.characteristics.textStyle}
-- Apply effects (outlines, shadows, gradients) as described in the style.
-- The text should look like a high-end professional design.
+[EXACT VISUAL REPRODUCTION FROM REFERENCE]
+- Copy the EXACT visual style, colors, and composition from reference images
+- Match the lighting, shadows, and color grading precisely
 
-[SPECIFICATIONS]
-- Match the EXACT visual style of the reference images provided
-
-[SPECIFICATIONS]
-- Aspect ratio: 16:9 (1280x720 pixels)
-- Style: ${pattern.name}
-- Color scheme: ${pattern.characteristics.colorScheme}
-
-${pattern.characteristics.subjectType === 'real_person' ? `[PERSON/SUBJECT]
+${pattern.characteristics.subjectType === 'real_person' ? `[PERSON - EXACT REPRODUCTION]
+- COPY the person from reference: same pose, same angle, same expression
 - Position: ${pattern.characteristics.personPosition}
-- Expression: ${pattern.characteristics.personExpression || 'expressive, engaging'}
-- Age/Gender: ${pattern.characteristics.personAttributes?.ageGroup || 'Young'}, ${pattern.characteristics.personAttributes?.gender || 'Male'}
-- Looks: ${pattern.characteristics.personAttributes?.hairStyle || 'Black hair'}, ${pattern.characteristics.personAttributes?.clothing || 'Simple clothes'}
-${pattern.characteristics.personAttributes?.distinctiveFeatures ? `- Features: ${pattern.characteristics.personAttributes.distinctiveFeatures}` : ''}
-- IMPORTANT: Reproduce the specific PERSON ATTRIBUTES above. Do not generate a generic older person if "Young" is specified.` :
-                    pattern.characteristics.subjectType === 'illustration' || pattern.characteristics.subjectType === 'character' ? `[CHARACTER/ILLUSTRATION]
-- Type: Illustration / Anime Style Character
-- Position: ${pattern.characteristics.personPosition}
-- Description: ${pattern.characteristics.personExpression || 'Engaging character'}
-- Style: Matches the reference image style (e.g. flat illustration, anime, 3D render)` :
-                        `[SUBJECT/OBJECT]
-- No person. Focus on text and background graphics.
+- Expression: ${pattern.characteristics.personExpression || 'engaging'}
+- Clothing: ${pattern.characteristics.personAttributes?.clothing || 'match reference'}
+- Hair: ${pattern.characteristics.personAttributes?.hairStyle || 'match reference'}
+- Age: ${pattern.characteristics.personAttributes?.ageGroup || 'match reference'}
+- IMPORTANT: Reproduce the EXACT person appearance from reference` :
+                    pattern.characteristics.subjectType === 'illustration' || pattern.characteristics.subjectType === 'character' ? `[CHARACTER/ILLUSTRATION - EXACT REPRODUCTION]
+- COPY the character/illustration EXACTLY from reference
+- Same art style (anime, flat, 3D, etc.)
+- Same pose, expression, colors
+- Same line weight and shading style
+- Position: ${pattern.characteristics.personPosition}` :
+                        `[GRAPHICS/ICONS - EXACT REPRODUCTION]
+- Reproduce all icons, stamps, badges from reference
+- Same colors, shapes, positions
 - Main element: ${pattern.characteristics.layout}`}
 
-[LAYOUT & COMPOSITION]
+[LAYOUT]
+- Aspect ratio: 16:9 (1280x720)
 - Layout: ${pattern.characteristics.layout}
-${pattern.characteristics.visualTechniques ? `- Visual techniques: ${pattern.characteristics.visualTechniques}` : ''}
+- Color scheme: ${pattern.characteristics.colorScheme}
 ${pattern.requiredMaterials ? `- Background: ${pattern.requiredMaterials.background}` : ''}
-${pattern.requiredMaterials?.props?.length ? `- Props: ${pattern.requiredMaterials.props.join(', ')}` : ''}
+${pattern.requiredMaterials?.props?.length ? `- Props/Icons: ${pattern.requiredMaterials.props.join(', ')}` : ''}
 
 [QUALITY]
-- 8K professional quality
-- Photorealistic
-- High contrast, vibrant colors
-- 8K professional quality
-- Photorealistic
-- High contrast, vibrant colors
-- Clean composition
-- The text must be legible and professional`;
+- 8K Ultra HD professional quality
+- Photorealistic for photos, clean vectors for illustrations
+- Vibrant, high-contrast colors
+
+[NEGATIVE - DO NOT]
+- NO garbled/broken Japanese text
+- NO distorted faces or hands
+- NO blurry elements
+- NO changing the person/character from reference
+- NO adding text other than "${text || videoTitle}"`;
+
 
             logs.push(`[Model Gen] '${pattern.name}' - ${referenceImages.length} refs loaded`);
 
@@ -497,6 +498,118 @@ JSON形式で回答:
 }
 
 // ========================================
+// 2.5 Generate SINGLE Model Image (for streaming API)
+// ========================================
+export async function generateSingleModelImage(
+    pattern: PatternCategory,
+    videoTitle: string,
+    videoDescription: string = "",
+    thumbnailUrls: string[] = [],
+    customText: string = ""
+): Promise<{ data?: ModelImageInfo; error?: string }> {
+    await requireRole("student");
+
+    try {
+        const exampleIndices = pattern.exampleImageIndices || [];
+        let referenceImages: { mimeType: string; data: string }[] = [];
+
+        if (thumbnailUrls && exampleIndices.length > 0) {
+            const refUrls = exampleIndices
+                .map(idx => thumbnailUrls[idx - 1])
+                .filter(Boolean)
+                .slice(0, 2);
+
+            const fetchPromises = refUrls.map(async (url) => {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+                    const res = await fetch(url, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    if (!res.ok) return null;
+                    const buffer = await res.arrayBuffer();
+                    const base64 = Buffer.from(buffer).toString('base64');
+                    const mimeType = res.headers.get('content-type') || 'image/jpeg';
+                    return { mimeType, data: base64 };
+                } catch { return null; }
+            });
+            referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
+        }
+
+        const textToRender = customText || videoTitle;
+        const promptForImage = `Create a YouTube thumbnail image with text.
+
+[TEXT - EXACT REPRODUCTION]
+- Text to render: "${textToRender}"
+- Reproduce the EXACT font style from reference images
+- If reference uses Gothic (ゴシック): heavy sans-serif, blocky
+- If reference uses Mincho (明朝): sharp serif with contrast
+- If reference uses Brush (筆文字): dynamic calligraphy
+- Copy text effects: outlines, shadows, gradients exactly from reference
+- Text position: ${pattern.characteristics.textPosition}
+- Font style: ${pattern.characteristics.textStyle}
+
+[EXACT VISUAL REPRODUCTION FROM REFERENCE]
+- Copy the EXACT visual style, colors, and composition from reference images
+
+${pattern.characteristics.subjectType === 'real_person' ? `[PERSON - EXACT REPRODUCTION]
+- COPY the person from reference: same pose, same angle, same expression
+- Position: ${pattern.characteristics.personPosition}
+- IMPORTANT: Reproduce the EXACT person appearance from reference` :
+                pattern.characteristics.subjectType === 'illustration' || pattern.characteristics.subjectType === 'character' ? `[CHARACTER/ILLUSTRATION - EXACT REPRODUCTION]
+- COPY the character/illustration EXACTLY from reference
+- Same art style, pose, expression, colors` :
+                    `[GRAPHICS/ICONS - EXACT REPRODUCTION]
+- Reproduce all icons, stamps, badges from reference`}
+
+[LAYOUT]
+- Aspect ratio: 16:9 (1280x720)
+- Layout: ${pattern.characteristics.layout}
+- Color scheme: ${pattern.characteristics.colorScheme}
+
+[QUALITY]
+- 8K Ultra HD professional quality
+- Vibrant, high-contrast colors
+
+[NEGATIVE - DO NOT]
+- NO garbled/broken Japanese text
+- NO distorted faces or hands
+- NO blurry elements`;
+
+        let imageUrl: string;
+        try {
+            if (referenceImages.length > 0) {
+                const { generateImageWithReference } = await import("@/lib/gemini");
+                imageUrl = await generateImageWithReference(promptForImage, referenceImages);
+            } else {
+                imageUrl = await generateThumbnailImage(promptForImage);
+            }
+        } catch (e) {
+            console.error(`Failed to generate image for pattern ${pattern.name}:`, e);
+            return {
+                data: {
+                    imageUrl: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4MCIgaGVpZ2h0PSI3MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzMzMyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjQ4IiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7nlJ/miJDjgqjjg6njg7w8L3RleHQ+PC9zdmc+",
+                    patternName: pattern.name,
+                    description: `${pattern.description} (生成失敗)`,
+                    suggestedTexts: [{ text: "衝撃", reason: "インパクト" }]
+                }
+            };
+        }
+
+        return {
+            data: {
+                imageUrl,
+                patternName: pattern.name,
+                description: pattern.description,
+                suggestedTexts: [{ text: videoTitle.slice(0, 6), reason: "タイトルから抽出" }]
+            }
+        };
+    } catch (e: any) {
+        console.error("Single model generation error:", e);
+        return { error: e.message || "モデル画像生成エラー" };
+    }
+}
+
+// ========================================
 // 3. Generate Thumbnail Image
 // ========================================
 export async function generateThumbnailImage(prompt: string): Promise<string> {
@@ -554,49 +667,47 @@ export async function generateFinalThumbnails(
 
         // Generate images in parallel
         const promises = Array.from({ length: count }).map(async (_, i) => {
-            // Enhanced prompt that emphasizes using the model image as base
-            const variationPrompt = `[TASK]: Create a final YouTube thumbnail by combining the model image with text overlay.
+            // FINAL THUMBNAIL: Add exact text to template
+            const variationPrompt = `[TASK]: Add text overlay to the model image template.
 
-[MANDATORY - EXACT TEXT]
-The ONLY text on this thumbnail must be: "${text}"
-- IMPORTANT: Render the Japanese text "${text}" clearly and legibly.
-- Avoid broken characters or "alien" text. Use standard Japanese characters.
-- DO NOT add any other text, labels, watermarks, or typography
-- Text position: prominent center or upper area, maximum visibility
+[MANDATORY TEXT - EXACT CHARACTERS]
+Render EXACTLY this text: "${text}"
+- Write ONLY these characters: "${text}"
+- DO NOT modify, paraphrase, or add to this text
+- DO NOT write any other text, labels, or watermarks
+- Use standard Japanese characters (no garbled/broken text)
 
-[TYPOGRAPHY REPRODUCTION (CRITICAL)]
-- Font Style Description: ${textStyle}
-- YOU MUST REPRODUCE THE EXACT TYPOGRAPHY STYLE described above.
-- If the style mentions "Gothic" (ゴシック), use a heavy, blocky sans-serif font.
-- If the style mentions "Mincho" (明朝), use a sharp, high-contrast serif font.
-- If the style mentions "Brush" (筆文字), use a dynamic calligraphy style.
-- Apply effects (heavy strokes, multiple outlines, drop shadows, gradients) EXACTLY as described.
-- The text should look like a high-end design element, not just plain text overlay.
+[TYPOGRAPHY - MATCH REFERENCE STYLE]
+- Font style: ${textStyle}
+- If "Gothic/ゴシック": heavy sans-serif, blocky
+- If "Mincho/明朝": sharp serif with contrast
+- If "Brush/筆文字": dynamic calligraphy
+- Apply effects from reference: outlines, shadows, gradients
+- Text must look professionally designed
 
-[STYLE REFERENCE]
-- Pattern name: ${modelImage?.patternName || 'professional thumbnail'}
-- Use the model image as the primary visual base
-- Maintain the same person, pose, expression, lighting, and composition from the model
-${patternData?.characteristics?.subjectType === 'real_person' ? `- PERSON: ${patternData?.characteristics?.personAttributes?.ageGroup || ''} ${patternData?.characteristics?.personAttributes?.gender || ''}` : ''}
-- Color scheme: ${colorScheme}
+[PRESERVE FROM MODEL IMAGE]
+- Keep the EXACT same person/character (pose, expression, clothing)
+- Keep the EXACT same background and composition
+- Keep the EXACT same color scheme: ${colorScheme}
+- Keep all icons, stamps, badges in their original positions
+${patternData?.characteristics?.subjectType === 'real_person' ? `- PERSON must match model exactly` : patternData?.characteristics?.subjectType === 'illustration' || patternData?.characteristics?.subjectType === 'character' ? `- CHARACTER/ILLUSTRATION must match model exactly` : `- GRAPHICS must match model exactly`}
 
 [SPECIFICATIONS]
-- Resolution: 1280x720 (16:9 aspect ratio)
-- Style: ${patternData?.description || 'eye-catching YouTube thumbnail'}
-${patternData?.characteristics?.visualTechniques ? `- Visual effects: ${patternData.characteristics.visualTechniques}` : ''}
-- Ensure pure, clean, valid Japanese text rendering.
+- Resolution: 1280x720 (16:9)
+- 8K professional quality
+- High contrast, vibrant colors
 
-[CRITICAL QUALITY REQUIREMENTS]
-- Create as if this is taken from a professional YouTube channel
-- Photorealistic quality for any people in the image
-- Sharp, high-definition image (8K equivalent quality)
-- Professional color grading and contrast
-- The text "${text}" must look like it was designed by a professional graphic designer
+[NEGATIVE - ABSOLUTELY DO NOT]
+- DO NOT write text other than "${text}"
+- DO NOT change the person/character appearance
+- DO NOT add new people or elements
+- DO NOT create garbled/broken Japanese text
+- DO NOT blur or distort any element
 
-[VARIATION ${i + 1} of ${count}]
-${i === 0 ? '- Standard composition from model image' : i === 1 ? '- Slightly more dynamic composition, vibrant colors' : '- Alternative angle or emphasis, maintain quality'}
+[VARIATION ${i + 1}]
+${i === 0 ? 'Standard composition' : i === 1 ? 'Slightly more vibrant' : 'Alternative emphasis'}
 
-IMPORTANT: The visual style must match the model image. ${patternData?.characteristics?.subjectType === 'real_person' ? `The person in the image must look exactly like the model image (Age: ${patternData?.characteristics?.personAttributes?.ageGroup}).` : 'Maintain the illustration/graphic style of the model image.'} The text styling must match the reference thumbnails' typography.`;
+CRITICAL: The ONLY text must be "${text}". Everything else stays identical to model.`;
 
             try {
                 if (referenceImages.length > 0) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Loader2, Copy, Download, ArrowLeft, ArrowRight, Check, Edit3, RefreshCw,
-    Search, Globe, Users, Lightbulb, FileText, PenTool, Link as LinkIcon
+    Search, Globe, Users, Lightbulb, FileText, PenTool, Link as LinkIcon, MessageSquare
 } from "lucide-react";
 import {
     SEOWorkflowState,
@@ -23,6 +23,7 @@ import {
     ArticleOutline,
     GeneratedArticle,
     Tone,
+    ReaderLevel,
     TONE_OPTIONS,
     READER_LEVEL_OPTIONS,
     initialSEOState,
@@ -46,6 +47,17 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
     const [state, setState] = useState<SEOWorkflowState>(initialSEOState);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [isEditingReaderAnalysis, setIsEditingReaderAnalysis] = useState(false);
+    const [showRegenerateStep2, setShowRegenerateStep2] = useState(false);
+    const [showRegenerateStep3, setShowRegenerateStep3] = useState(false);
+    const [showRegenerateStep4, setShowRegenerateStep4] = useState(false);
+    const [showRegenerateStep5, setShowRegenerateStep5] = useState(false);
+    const [outputFormat, setOutputFormat] = useState<'html' | 'markdown' | 'plaintext'>('html');
+
+    // Scroll to top whenever step changes
+    useEffect(() => {
+        window.scrollTo({ top: 0, behavior: 'instant' }); // Use 'instant' to prevent weird visual jumps during render
+    }, [state.step]);
 
     const updateState = (updates: Partial<SEOWorkflowState>) => {
         setState(prev => ({ ...prev, ...updates }));
@@ -362,26 +374,39 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
     // Confirm Step 5 (Outline) - Just mark as confirmed to show Link Settings
     const handleConfirmStep5 = () => {
         updateState({ step5Confirmed: true });
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    // Fetch Internal Links
+
+    // Fetch Internal Links - now auto-suggests based on article structure
     const handleFetchInternalLinks = async () => {
         if (!state.internalLinksUrl.trim()) return;
 
         setLoading(true);
         try {
+            // Get the selected title and outline sections for relevance filtering
+            const selectedTitle = state.outline?.titleCandidates?.[state.outline?.selectedTitleIndex]?.title || state.outline?.h1 || state.primaryKeyword;
+            const outlineSections = state.outline?.sections?.map(s => ({
+                h2: s.h2,
+                h3List: s.h3List
+            })) || [];
+
             const response = await fetch("/api/seo/fetch-links", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url: state.internalLinksUrl }),
+                body: JSON.stringify({
+                    url: state.internalLinksUrl,
+                    keyword: state.primaryKeyword,
+                    articleTitle: selectedTitle,
+                    outlineSections: outlineSections
+                }),
             });
             const data = await response.json();
             if (data.success) {
                 updateState({
                     internalLinks: data.data,
-                    // Default select top 5
-                    selectedInternalLinks: data.data.slice(0, 5)
+                    // Default select all suggested (since they are already filtered by AI)
+                    selectedInternalLinks: data.data
                 });
             } else {
                 setErrorMessage(data.error || "内部リンクの取得に失敗しました");
@@ -454,17 +479,57 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
 
     const handleCopy = () => {
         if (state.generatedContent?.content) {
-            navigator.clipboard.writeText(state.generatedContent.content);
+            let content = state.generatedContent.content;
+            if (outputFormat === 'markdown') {
+                // Convert HTML to Markdown (simple conversion)
+                content = content
+                    .replace(/<h1[^>]*>(.*?)<\/h1>/g, '# $1\n')
+                    .replace(/<h2[^>]*>(.*?)<\/h2>/g, '## $1\n')
+                    .replace(/<h3[^>]*>(.*?)<\/h3>/g, '### $1\n')
+                    .replace(/<p[^>]*>(.*?)<\/p>/g, '$1\n\n')
+                    .replace(/<strong>(.*?)<\/strong>/g, '**$1**')
+                    .replace(/<em>(.*?)<\/em>/g, '*$1*')
+                    .replace(/<li>(.*?)<\/li>/g, '- $1\n')
+                    .replace(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/g, '\n')
+                    .replace(/<[^>]+>/g, '');
+            } else if (outputFormat === 'plaintext') {
+                // Convert HTML to plain text
+                content = content.replace(/<[^>]+>/g, '').replace(/\n\s*\n/g, '\n\n');
+            }
+            navigator.clipboard.writeText(content);
         }
     };
 
     const handleDownload = () => {
         if (state.generatedContent?.content) {
-            const blob = new Blob([state.generatedContent.content], { type: "text/html;charset=utf-8" });
+            let content = state.generatedContent.content;
+            let mimeType = 'text/html;charset=utf-8';
+            let extension = 'html';
+
+            if (outputFormat === 'markdown') {
+                content = content
+                    .replace(/<h1[^>]*>(.*?)<\/h1>/g, '# $1\n')
+                    .replace(/<h2[^>]*>(.*?)<\/h2>/g, '## $1\n')
+                    .replace(/<h3[^>]*>(.*?)<\/h3>/g, '### $1\n')
+                    .replace(/<p[^>]*>(.*?)<\/p>/g, '$1\n\n')
+                    .replace(/<strong>(.*?)<\/strong>/g, '**$1**')
+                    .replace(/<em>(.*?)<\/em>/g, '*$1*')
+                    .replace(/<li>(.*?)<\/li>/g, '- $1\n')
+                    .replace(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/g, '\n')
+                    .replace(/<[^>]+>/g, '');
+                mimeType = 'text/markdown;charset=utf-8';
+                extension = 'md';
+            } else if (outputFormat === 'plaintext') {
+                content = content.replace(/<[^>]+>/g, '').replace(/\n\s*\n/g, '\n\n');
+                mimeType = 'text/plain;charset=utf-8';
+                extension = 'txt';
+            }
+
+            const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `${state.primaryKeyword.replace(/\s+/g, "_")}_article.html`;
+            a.download = `${state.primaryKeyword.replace(/\s+/g, "_")}_article.${extension}`;
             a.click();
             URL.revokeObjectURL(url);
         }
@@ -479,6 +544,158 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
         if (step < state.step) {
             updateState({ step });
             window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    };
+
+    // Regeneration handlers with modification instructions
+    const handleRegenerateStep2 = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const analyses: ArticleStructureAnalysis[] = [];
+            const articlesToAnalyze = state.referenceArticles.length > 0
+                ? state.referenceArticles
+                : state.referenceUrls.map((url, i) => ({
+                    url,
+                    title: `${state.primaryKeyword}に関する参考記事${i + 1}`,
+                    content: `この記事は${state.primaryKeyword}について解説しています。URL: ${url}`,
+                    h2Sections: [],
+                }));
+
+            for (const article of articlesToAnalyze) {
+                const response = await fetch("/api/seo/structure", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        articleTitle: article.title || `${state.primaryKeyword}に関する記事`,
+                        articleContent: article.content || "",
+                        modificationInstructions: state.regenerateStep2Instructions,
+                    }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    analyses.push(data.data as ArticleStructureAnalysis);
+                }
+            }
+            updateState({ structureAnalyses: analyses, regenerateStep2Instructions: '' });
+            setShowRegenerateStep2(false);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (e: unknown) {
+            setErrorMessage(e instanceof Error ? e.message : "再生成に失敗しました");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRegenerateStep3 = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const articleSummary = state.structureAnalyses
+                .map(a => a.h2Analyses.map(h => h.h2Text).join(", "))
+                .join("\n");
+
+            const response = await fetch("/api/seo/reader", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    primaryKeyword: state.primaryKeyword,
+                    articleSummary,
+                    searchIntentAnalysis: state.searchIntentAnalysis,
+                    modificationInstructions: state.regenerateStep3Instructions,
+                }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                updateState({ readerAnalysis: data.data as ReaderAnalysis, regenerateStep3Instructions: '' });
+                setShowRegenerateStep3(false);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+                setErrorMessage(data.error || "再生成に失敗しました");
+            }
+        } catch (e: unknown) {
+            setErrorMessage(e instanceof Error ? e.message : "再生成に失敗しました");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRegenerateStep4 = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await fetch("/api/seo/improvements", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    readerAnalysis: state.readerAnalysis,
+                    structureAnalyses: state.structureAnalyses,
+                    modificationInstructions: state.regenerateStep4Instructions,
+                }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                const improvements = data.data as ImprovementSuggestions;
+                const selectedAxes = (improvements.axes || []).map((_, i) => ({
+                    axisIndex: i,
+                    additionSelected: true,
+                    removalSelected: true,
+                }));
+                updateState({
+                    improvements,
+                    selectedImprovements: { selectedAxes },
+                    regenerateStep4Instructions: ''
+                });
+                setShowRegenerateStep4(false);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+                setErrorMessage(data.error || "再生成に失敗しました");
+            }
+        } catch (e: unknown) {
+            setErrorMessage(e instanceof Error ? e.message : "再生成に失敗しました");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRegenerateStep5 = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const titleAnalysis = state.structureAnalyses[0]?.titleAnalysis;
+            const h2Structure = state.structureAnalyses.flatMap(a => a.h2Analyses);
+
+            const response = await fetch("/api/seo/outline", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    primaryKeyword: state.primaryKeyword,
+                    secondaryKeywords: state.secondaryKeywords.split(",").map(k => k.trim()).filter(Boolean),
+                    readerAnalysis: state.readerAnalysis,
+                    titleAnalysis,
+                    h2Structure,
+                    selectedImprovements: state.selectedImprovements,
+                    improvements: state.improvements,
+                    wordCountMin: state.wordCountMin,
+                    wordCountMax: state.wordCountMax,
+                    modificationInstructions: state.regenerateStep5Instructions,
+                }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                updateState({
+                    outline: data.data as ArticleOutline,
+                    regenerateStep5Instructions: ''
+                });
+                setShowRegenerateStep5(false);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+                setErrorMessage(data.error || "再生成に失敗しました");
+            }
+        } catch (e: unknown) {
+            setErrorMessage(e instanceof Error ? e.message : "再生成に失敗しました");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -746,17 +963,47 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                     </div>
                                 ))}
 
-                                <div className="flex gap-2 pt-4">
-                                    <Button variant="outline" onClick={() => updateState({ step: 1 })}>
-                                        <ArrowLeft className="mr-2 h-4 w-4" />
-                                        戻る
-                                    </Button>
-                                    <Button onClick={handleConfirmStep2} disabled={loading}>
-                                        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        この分析で進む
-                                        <ArrowRight className="ml-2 h-4 w-4" />
-                                    </Button>
-                                </div>
+                                {/* Regeneration UI */}
+                                {showRegenerateStep2 ? (
+                                    <div className="border-t pt-4 mt-4 space-y-3">
+                                        <Label className="flex items-center gap-2">
+                                            <MessageSquare className="h-4 w-4" />
+                                            修正指示を入力してください
+                                        </Label>
+                                        <Textarea
+                                            value={state.regenerateStep2Instructions}
+                                            onChange={(e) => updateState({ regenerateStep2Instructions: e.target.value })}
+                                            placeholder="例: H2の順序を変更して、まず基礎知識から説明してください"
+                                            rows={3}
+                                        />
+                                        <div className="flex gap-2">
+                                            <Button variant="outline" onClick={() => setShowRegenerateStep2(false)}>
+                                                キャンセル
+                                            </Button>
+                                            <Button onClick={handleRegenerateStep2} disabled={loading}>
+                                                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                <RefreshCw className="mr-2 h-4 w-4" />
+                                                再生成
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2 pt-4">
+                                        <Button variant="outline" onClick={() => updateState({ step: 1 })}>
+                                            <ArrowLeft className="mr-2 h-4 w-4" />
+                                            戻る
+                                        </Button>
+                                        <Button variant="outline" onClick={() => setShowRegenerateStep2(true)}>
+                                            <Edit3 className="mr-2 h-4 w-4" />
+                                            修正して再生成
+                                        </Button>
+                                        <Button onClick={handleConfirmStep2} disabled={loading}>
+                                            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            この分析で進む
+                                            <ArrowRight className="ml-2 h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </div>
@@ -801,12 +1048,65 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                 </div>
 
                                 <div>
-                                    <Label className="text-muted-foreground">悩み・ニーズ</Label>
-                                    <ul className="list-disc list-inside text-sm">
-                                        {state.readerAnalysis.painPoints.map((point, i) => (
-                                            <li key={i}>{point}</li>
-                                        ))}
-                                    </ul>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <Label className="text-muted-foreground">悩み・ニーズ</Label>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setIsEditingReaderAnalysis(!isEditingReaderAnalysis)}
+                                        >
+                                            <Edit3 className="h-4 w-4 mr-1" />
+                                            {isEditingReaderAnalysis ? "完了" : "修正する"}
+                                        </Button>
+                                    </div>
+
+                                    {isEditingReaderAnalysis ? (
+                                        <div className="space-y-4 border p-4 rounded-md bg-muted/20">
+                                            <div className="space-y-2">
+                                                <Label>悩み（カンマ区切りなどで自由に入力）</Label>
+                                                <Textarea
+                                                    value={state.readerAnalysis.painPoints.join('\n')}
+                                                    onChange={(e) => {
+                                                        const points = e.target.value.split('\n').filter(line => line.trim());
+                                                        updateState({
+                                                            readerAnalysis: {
+                                                                ...state.readerAnalysis!,
+                                                                painPoints: points
+                                                            }
+                                                        });
+                                                    }}
+                                                    rows={4}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>導入で興味を持つポイント（カンマ区切りなどで自由に入力）</Label>
+                                                <Textarea
+                                                    value={state.readerAnalysis.introductionInterest.interestPoints.join('\n')}
+                                                    onChange={(e) => {
+                                                        const points = e.target.value.split('\n').filter(line => line.trim());
+                                                        updateState({
+                                                            readerAnalysis: {
+                                                                ...state.readerAnalysis!,
+                                                                introductionInterest: {
+                                                                    ...state.readerAnalysis!.introductionInterest,
+                                                                    interestPoints: points
+                                                                }
+                                                            }
+                                                        });
+                                                    }}
+                                                    rows={4}
+                                                />
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <ul className="list-disc list-inside text-sm">
+                                                {state.readerAnalysis.painPoints.map((point, i) => (
+                                                    <li key={i}>{point}</li>
+                                                ))}
+                                            </ul>
+                                        </>
+                                    )}
                                 </div>
 
                                 <div className="bg-primary/5 p-4 rounded-lg">
@@ -819,17 +1119,119 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                     </div>
                                 </div>
 
-                                <div className="flex gap-2 pt-4">
-                                    <Button variant="outline" onClick={() => updateState({ step: 2 })}>
-                                        <ArrowLeft className="mr-2 h-4 w-4" />
-                                        戻る
-                                    </Button>
-                                    <Button onClick={handleConfirmStep3} disabled={loading}>
-                                        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        この分析で進む
-                                        <ArrowRight className="ml-2 h-4 w-4" />
-                                    </Button>
-                                </div>
+                                {/* Enhanced Editing for Level and Persona */}
+                                {isEditingReaderAnalysis && (
+                                    <div className="border-t pt-4 mt-4 space-y-4">
+                                        <div className="grid gap-4 md:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>レベル感</Label>
+                                                <Select
+                                                    value={state.readerAnalysis.level}
+                                                    onValueChange={(v) => updateState({
+                                                        readerAnalysis: {
+                                                            ...state.readerAnalysis!,
+                                                            level: v as ReaderLevel
+                                                        }
+                                                    })}
+                                                >
+                                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {READER_LEVEL_OPTIONS.map(opt => (
+                                                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>年齢層</Label>
+                                                <Input
+                                                    value={state.readerAnalysis.persona.ageGroup}
+                                                    onChange={(e) => updateState({
+                                                        readerAnalysis: {
+                                                            ...state.readerAnalysis!,
+                                                            persona: {
+                                                                ...state.readerAnalysis!.persona,
+                                                                ageGroup: e.target.value
+                                                            }
+                                                        }
+                                                    })}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>職業</Label>
+                                                <Input
+                                                    value={state.readerAnalysis.persona.occupation}
+                                                    onChange={(e) => updateState({
+                                                        readerAnalysis: {
+                                                            ...state.readerAnalysis!,
+                                                            persona: {
+                                                                ...state.readerAnalysis!.persona,
+                                                                occupation: e.target.value
+                                                            }
+                                                        }
+                                                    })}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>状況</Label>
+                                                <Input
+                                                    value={state.readerAnalysis.persona.situation}
+                                                    onChange={(e) => updateState({
+                                                        readerAnalysis: {
+                                                            ...state.readerAnalysis!,
+                                                            persona: {
+                                                                ...state.readerAnalysis!.persona,
+                                                                situation: e.target.value
+                                                            }
+                                                        }
+                                                    })}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Regeneration UI */}
+                                {showRegenerateStep3 ? (
+                                    <div className="border-t pt-4 mt-4 space-y-3">
+                                        <Label className="flex items-center gap-2">
+                                            <MessageSquare className="h-4 w-4" />
+                                            修正指示を入力してください
+                                        </Label>
+                                        <Textarea
+                                            value={state.regenerateStep3Instructions}
+                                            onChange={(e) => updateState({ regenerateStep3Instructions: e.target.value })}
+                                            placeholder="例: ペルソナをもっと具体的に。30代の主婦で副業を探している人に変更してください"
+                                            rows={3}
+                                        />
+                                        <div className="flex gap-2">
+                                            <Button variant="outline" onClick={() => setShowRegenerateStep3(false)}>
+                                                キャンセル
+                                            </Button>
+                                            <Button onClick={handleRegenerateStep3} disabled={loading}>
+                                                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                <RefreshCw className="mr-2 h-4 w-4" />
+                                                再生成
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2 pt-4">
+                                        <Button variant="outline" onClick={() => { updateState({ step: 2 }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+                                            <ArrowLeft className="mr-2 h-4 w-4" />
+                                            戻る
+                                        </Button>
+                                        <Button variant="outline" onClick={() => setShowRegenerateStep3(true)}>
+                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                            修正して再生成
+                                        </Button>
+                                        <Button onClick={handleConfirmStep3} disabled={loading}>
+                                            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            この分析で進む
+                                            <ArrowRight className="ml-2 h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </div>
@@ -922,17 +1324,47 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                     </table>
                                 </div>
 
-                                <div className="flex gap-2 pt-4">
-                                    <Button variant="outline" onClick={() => updateState({ step: 3 })}>
-                                        <ArrowLeft className="mr-2 h-4 w-4" />
-                                        戻る
-                                    </Button>
-                                    <Button onClick={handleConfirmStep4} disabled={loading}>
-                                        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        選択した改善点で構成を作成
-                                        <ArrowRight className="ml-2 h-4 w-4" />
-                                    </Button>
-                                </div>
+                                {/* Regeneration UI */}
+                                {showRegenerateStep4 ? (
+                                    <div className="border-t pt-4 mt-4 space-y-3">
+                                        <Label className="flex items-center gap-2">
+                                            <MessageSquare className="h-4 w-4" />
+                                            修正指示を入力してください
+                                        </Label>
+                                        <Textarea
+                                            value={state.regenerateStep4Instructions}
+                                            onChange={(e) => updateState({ regenerateStep4Instructions: e.target.value })}
+                                            placeholder="例: 差別化ポイントをもっと具体的に提案してください"
+                                            rows={3}
+                                        />
+                                        <div className="flex gap-2">
+                                            <Button variant="outline" onClick={() => setShowRegenerateStep4(false)}>
+                                                キャンセル
+                                            </Button>
+                                            <Button onClick={handleRegenerateStep4} disabled={loading}>
+                                                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                <RefreshCw className="mr-2 h-4 w-4" />
+                                                再生成
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2 pt-4">
+                                        <Button variant="outline" onClick={() => { updateState({ step: 3 }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+                                            <ArrowLeft className="mr-2 h-4 w-4" />
+                                            戻る
+                                        </Button>
+                                        <Button variant="outline" onClick={() => setShowRegenerateStep4(true)}>
+                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                            修正して再生成
+                                        </Button>
+                                        <Button onClick={handleConfirmStep4} disabled={loading}>
+                                            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            選択した改善点で構成を作成
+                                            <ArrowRight className="ml-2 h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </div>
@@ -1019,16 +1451,46 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                     </p>
                                 </div>
 
-                                <div className="flex gap-2 pt-4">
-                                    <Button variant="outline" onClick={() => updateState({ step: 4 })}>
-                                        <ArrowLeft className="mr-2 h-4 w-4" />
-                                        戻る
-                                    </Button>
-                                    <Button onClick={handleConfirmStep5} disabled={loading}>
-                                        構成を確定して次へ
-                                        <ArrowRight className="ml-2 h-4 w-4" />
-                                    </Button>
-                                </div>
+                                {/* Regeneration UI */}
+                                {showRegenerateStep5 ? (
+                                    <div className="border-t pt-4 mt-4 space-y-3">
+                                        <Label className="flex items-center gap-2">
+                                            <MessageSquare className="h-4 w-4" />
+                                            修正指示を入力してください
+                                        </Label>
+                                        <Textarea
+                                            value={state.regenerateStep5Instructions}
+                                            onChange={(e) => updateState({ regenerateStep5Instructions: e.target.value })}
+                                            placeholder="例: H2の順序を入れ替えて、まず基礎編から始めてください"
+                                            rows={3}
+                                        />
+                                        <div className="flex gap-2">
+                                            <Button variant="outline" onClick={() => setShowRegenerateStep5(false)}>
+                                                キャンセル
+                                            </Button>
+                                            <Button onClick={handleRegenerateStep5} disabled={loading}>
+                                                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                <RefreshCw className="mr-2 h-4 w-4" />
+                                                再生成
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2 pt-4">
+                                        <Button variant="outline" onClick={() => { updateState({ step: 4 }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+                                            <ArrowLeft className="mr-2 h-4 w-4" />
+                                            戻る
+                                        </Button>
+                                        <Button variant="outline" onClick={() => setShowRegenerateStep5(true)}>
+                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                            修正して再生成
+                                        </Button>
+                                        <Button onClick={handleConfirmStep5} disabled={loading}>
+                                            構成を確定して次へ
+                                            <ArrowRight className="ml-2 h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
 
@@ -1160,7 +1622,7 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                 />
 
                                 <div className="flex gap-2 pt-4">
-                                    <Button variant="outline" onClick={() => updateState({ step: 5 })}>
+                                    <Button variant="outline" onClick={() => { updateState({ step: 5 }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
                                         <ArrowLeft className="mr-2 h-4 w-4" />
                                         構成に戻る
                                     </Button>

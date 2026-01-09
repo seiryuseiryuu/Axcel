@@ -59,7 +59,8 @@ export function ChannelSelector({
             }
 
             const info = infoRes.data;
-            const videosRes = await fetchChannelVideos(info.id, info.uploadsPlaylistId);
+            // サムネイル用に緩いフィルタリング（60秒以上）で40本取得
+            const videosRes = await fetchChannelVideos(info.id, info.uploadsPlaylistId, 40, true);
 
             if (!videosRes.success) {
                 onUpdateChannel(channel.id, { isLoading: false });

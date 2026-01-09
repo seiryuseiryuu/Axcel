@@ -13,6 +13,7 @@ import {
     ChevronLeft, ChevronRight, Palette, Sparkles, Home, LogOut
 } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
+import { useToast } from "@/hooks/use-toast";
 
 interface ToolItem {
     title: string;
@@ -20,41 +21,31 @@ interface ToolItem {
     icon: React.ComponentType<{ className?: string }>;
     category: string;
     isNew?: boolean;
+    comingSoon?: boolean;
 }
 
 const tools: ToolItem[] = [
     // Content Tools
     { title: "SEO記事作成", href: "/studio/seo", icon: BookText, category: "content" },
     { title: "YouTube台本", href: "/studio/script", icon: Video, category: "content" },
-    { title: "ショート動画台本", href: "/studio/short-script", icon: FileVideo, category: "content" },
-    { title: "動画切り抜き分析", href: "/studio/video-clip", icon: Scissors, category: "content", isNew: true },
-    { title: "X・Threads投稿", href: "/studio/social-post", icon: Twitter, category: "content" },
-    { title: "note文章", href: "/studio/note-writing", icon: FileText, category: "content" },
-    { title: "プレゼン資料", href: "/studio/presentation", icon: Presentation, category: "content" },
+    { title: "ショート動画台本", href: "/studio/short-script", icon: FileVideo, category: "content", comingSoon: true },
+    { title: "X・Threads投稿", href: "/studio/social-post", icon: Twitter, category: "content", comingSoon: true },
+    { title: "note文章", href: "/studio/note-writing", icon: FileText, category: "content", comingSoon: true },
 
     // Image Tools
     { title: "YouTubeサムネイル", href: "/studio/thumbnail", icon: Image, category: "image" },
-    { title: "ブログアイキャッチ", href: "/studio/eyecatch", icon: ImagePlus, category: "image" },
-    { title: "インスタストーリーズ", href: "/studio/insta-story", icon: Instagram, category: "image" },
-    { title: "LINEバナー", href: "/studio/line-banner", icon: MessageSquare, category: "image" },
-    { title: "note/Brain/Tips", href: "/studio/note-thumbnail", icon: FileText, category: "image" },
+    { title: "ブログアイキャッチ", href: "/studio/eyecatch", icon: ImagePlus, category: "image", comingSoon: true },
+    { title: "インスタストーリーズ", href: "/studio/insta-story", icon: Instagram, category: "image", comingSoon: true },
+    { title: "LINEバナー", href: "/studio/line-banner", icon: MessageSquare, category: "image", comingSoon: true },
+    { title: "note/Brain/Tips", href: "/studio/note-thumbnail", icon: FileText, category: "image", comingSoon: true },
 
     // Copywriting Tools
-    { title: "セールスレター", href: "/studio/sales-letter", icon: Mail, category: "copy" },
-    { title: "LPライティング", href: "/studio/lp-writing", icon: Layout, category: "copy" },
-    { title: "VSLライティング", href: "/studio/vsl-writing", icon: MonitorPlay, category: "copy" },
-
     // Strategy Tools
-    { title: "商品設計", href: "/studio/product-design", icon: Package, category: "strategy" },
-    { title: "ファネル設計", href: "/studio/funnel-design", icon: GitBranch, category: "strategy" },
-    { title: "カリキュラム作成", href: "/studio/curriculum", icon: Cpu, category: "strategy" },
 ];
 
 const categories = [
     { id: "content", label: "コンテンツ作成", icon: FileText },
     { id: "image", label: "画像作成", icon: Image },
-    { id: "copy", label: "コピーライティング", icon: Mail },
-    { id: "strategy", label: "戦略設計", icon: Package },
 ];
 
 interface StudioToolSidebarProps {
@@ -66,10 +57,11 @@ interface StudioToolSidebarProps {
 
 export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAdmin }: StudioToolSidebarProps) {
     const [collapsed, setCollapsed] = useState(false);
+    const { toast } = useToast();
 
     // Filter tools if allowedTools is specified
     const filteredTools = allowedTools
-        ? tools.filter(t => allowedTools.includes(t.href))
+        ? tools.filter(t => allowedTools.includes(t.href) || t.comingSoon)
         : tools;
 
     // Filter categories to only show those with available tools
@@ -89,7 +81,7 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                         <div className="p-1.5 bg-primary/10 rounded-md">
                             <Sparkles className="h-4 w-4 text-primary" />
                         </div>
-                        <span className="font-bold text-sm tracking-tight">AI Studio</span>
+                        <span className="font-bold text-sm tracking-tight">Accel</span>
                     </div>
                 )}
                 <Button
@@ -116,6 +108,41 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                             <div className="space-y-1">
                                 {filteredTools.filter(t => t.category === category.id).map((tool) => {
                                     const isActive = activeTool === tool.href;
+
+                                    if (tool.comingSoon) {
+                                        return (
+                                            <Button
+                                                key={tool.href}
+                                                variant="ghost"
+                                                className={cn(
+                                                    "w-full justify-start h-10 text-sm transition-all duration-200 text-muted-foreground hover:text-foreground",
+                                                    collapsed && "justify-center px-0"
+                                                )}
+                                                title={collapsed ? tool.title : undefined}
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    toast({
+                                                        title: "準備中",
+                                                        description: `${tool.title}機能は現在開発中です。`,
+                                                    });
+                                                }}
+                                            >
+                                                <tool.icon className={cn(
+                                                    "h-4 w-4 flex-shrink-0 transition-colors mr-3 opacity-70",
+                                                    collapsed && "mr-0"
+                                                )} />
+                                                {!collapsed && (
+                                                    <span className="truncate flex-1 text-left flex items-center justify-between">
+                                                        {tool.title}
+                                                        <span className="text-[9px] bg-muted-foreground/20 px-1.5 py-0.5 rounded text-muted-foreground ml-2">
+                                                            Soon
+                                                        </span>
+                                                    </span>
+                                                )}
+                                            </Button>
+                                        );
+                                    }
+
                                     return (
                                         <Button
                                             key={tool.href}

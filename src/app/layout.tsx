@@ -19,8 +19,8 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "スキルラボ (Skill Lab)",
-  description: "AIスタジオを搭載した次世代の学習管理システム",
+  title: "AIマネタイズ総研",
+  description: "Accel - AIツールを搭載した次世代のマネタイズ支援システム",
   manifest: "/manifest.json",
   icons: {
     icon: "/icons/icon-72x72.png",

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { CreateStudentSheet } from "@/components/features/admin/CreateStudentSheet";
+import { StudentActionMenu } from "@/components/features/admin/StudentActionMenu";
 import {
     Table,
     TableBody,
@@ -82,9 +83,9 @@ export default async function StudentsPage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Students</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">ユーザー管理</h1>
                     <p className="text-muted-foreground">
-                        Manage your students and their AI Studio access.
+                        アカウントの作成とAI Studio利用期限の管理を行います
                     </p>
                 </div>
                 <CreateStudentSheet />
@@ -136,7 +137,11 @@ export default async function StudentsPage() {
                                     </TableCell>
                                     <TableCell>{new Date(student.created_at).toLocaleDateString()}</TableCell>
                                     <TableCell className="text-right">
-                                        <Button variant="ghost" size="sm">Details</Button>
+                                        <StudentActionMenu
+                                            studentId={student.id}
+                                            studentName={student.display_name}
+                                            studioEnabled={student.studio_enabled}
+                                        />
                                     </TableCell>
                                 </TableRow>
                             );

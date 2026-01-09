@@ -48,9 +48,22 @@ ${articlesInfo}
         const result = await model.generateContent(prompt);
         const text = result.response.text();
 
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        // Remove markdown code blocks if present
+        let cleanedText = text.trim();
+        if (cleanedText.startsWith("```json")) {
+            cleanedText = cleanedText.slice(7);
+        } else if (cleanedText.startsWith("```")) {
+            cleanedText = cleanedText.slice(3);
+        }
+        if (cleanedText.endsWith("```")) {
+            cleanedText = cleanedText.slice(0, -3);
+        }
+        cleanedText = cleanedText.trim();
+
+        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-            throw new Error("Failed to parse AI response");
+            console.error("Failed to parse search-intent AI response:", text.substring(0, 500));
+            throw new Error("検索意図の解析に失敗しました。もう一度お試しください。");
         }
 
         const analysis: SearchIntentAnalysis = JSON.parse(jsonMatch[0]);

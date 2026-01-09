@@ -5,13 +5,13 @@ import { StructureAnalysisRequest, ArticleStructureAnalysis } from "@/types/seo-
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
 
 export async function POST(req: NextRequest) {
-    try {
-        const body: StructureAnalysisRequest = await req.json();
-        const { articleTitle, articleContent } = body;
+  try {
+    const body: StructureAnalysisRequest = await req.json();
+    const { articleTitle, articleContent, modificationInstructions } = body;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-        const prompt = `あなたはSEO記事の構成分析の専門家です。
+    const prompt = `あなたはSEO記事の構成分析の専門家です。
 以下の記事を詳細に分析してください。
 
 【記事タイトル】
@@ -45,6 +45,12 @@ ${articleContent.substring(0, 10000)}
    - 配置場所
    - CTA内容
 
+${modificationInstructions ? `
+【修正指示（ユーザーからの追加要望）】
+ユーザーから以下の修正指示がありました。これを最優先して分析を調整してください：
+"${modificationInstructions}"
+` : ""}
+
 以下のJSON形式で出力してください（コードブロックなしで純粋なJSONのみ）:
 {
   "titleAnalysis": {
@@ -72,20 +78,33 @@ ${articleContent.substring(0, 10000)}
   }
 }`;
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
 
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            throw new Error("Failed to parse AI response");
-        }
-
-        const analysis: ArticleStructureAnalysis = JSON.parse(jsonMatch[0]);
-
-        return NextResponse.json({ success: true, data: analysis });
-    } catch (error: unknown) {
-        console.error("SEO Structure Analysis Error:", error);
-        const message = error instanceof Error ? error.message : "Unknown error";
-        return NextResponse.json({ success: false, error: message }, { status: 500 });
+    // Remove markdown code blocks if present
+    let cleanedText = text.trim();
+    if (cleanedText.startsWith("```json")) {
+      cleanedText = cleanedText.slice(7);
+    } else if (cleanedText.startsWith("```")) {
+      cleanedText = cleanedText.slice(3);
     }
+    if (cleanedText.endsWith("```")) {
+      cleanedText = cleanedText.slice(0, -3);
+    }
+    cleanedText = cleanedText.trim();
+
+    const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("Failed to parse structure AI response:", text.substring(0, 500));
+      throw new Error("構成分析の解析に失敗しました。もう一度お試しください。");
+    }
+
+    const analysis: ArticleStructureAnalysis = JSON.parse(jsonMatch[0]);
+
+    return NextResponse.json({ success: true, data: analysis });
+  } catch (error: unknown) {
+    console.error("SEO Structure Analysis Error:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  }
 }

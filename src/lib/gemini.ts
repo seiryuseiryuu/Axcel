@@ -11,7 +11,7 @@ if (!apiKey) {
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
 
-export async function generateText(prompt: string, temp = 0.7, modelName = "gemini-2.0-flash") {
+export async function generateText(prompt: string, temp = 0.7, modelName = "gemini-3-pro-preview") {
     if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
     // Allow overriding the model
@@ -44,7 +44,7 @@ export async function generateWithYouTube(prompt: string, youtubeUrl: string, te
 
     // Use gemini-2.0-flash which has URL/video understanding capabilities
     const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash",
+        model: "gemini-2.0-flash-exp",
         generationConfig: {
             temperature: temp,
             maxOutputTokens: 8192,
@@ -82,7 +82,7 @@ export const gemini = genAI;
 export async function generateMultimodal(prompt: string, images: { mimeType: string; data: string }[]) {
     if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
 
     try {
         const imageParts = images.map(img => ({

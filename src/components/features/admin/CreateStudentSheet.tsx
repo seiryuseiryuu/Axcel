@@ -40,7 +40,7 @@ export function CreateStudentSheet({ availableCourses }: { availableCourses?: { 
         email: "",
         password: "",
         displayName: "",
-        studioMonths: "0",  // Default: no studio access
+        studioMonths: "unlimited",  // Default: unlimited access
     });
     const router = useRouter();
 

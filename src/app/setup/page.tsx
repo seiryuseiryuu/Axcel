@@ -99,8 +99,8 @@ export default function SetupPage() {
                         <CardContent className="space-y-4">
                             {message && (
                                 <div className={`p-3 rounded-md flex items-center gap-2 ${message.type === "success"
-                                        ? "bg-green-500/10 text-green-500"
-                                        : "bg-destructive/10 text-destructive"
+                                    ? "bg-green-500/10 text-green-500"
+                                    : "bg-destructive/10 text-destructive"
                                     }`}>
                                     {message.type === "success" ? (
                                         <CheckCircle className="h-4 w-4" />

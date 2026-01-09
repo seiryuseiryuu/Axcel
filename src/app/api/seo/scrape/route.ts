@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
         const $ = cheerio.load(html);
 
         // Remove script, style, nav, footer, header, aside elements
-        $("script, style, nav, footer, header, aside, .sidebar, .navigation, .menu, .advertisement, .ad, .ads").remove();
+        $("script, style, nav, footer, header, aside, .sidebar, .navigation, .menu, .advertisement, .ad, .ads, .related-posts, #related-posts").remove();
 
         // Get page title
         const title = $("h1").first().text().trim() || $("title").text().trim();
@@ -49,68 +49,102 @@ export async function POST(req: NextRequest) {
         // Get meta description
         const metaDescription = $('meta[name="description"]').attr("content") || "";
 
-        // Extract H2 sections with their content
+        // Extract H2 sections with their content using document order traversal
         const h2Sections: { h2: string; content: string; h3List: string[] }[] = [];
 
-        $("h2").each((_, h2Element) => {
-            const h2Text = $(h2Element).text().trim();
-            if (!h2Text) return;
+        // Find the main content area first to avoid picking up H2s from sidebars/footers if untagged
+        let searchContext = $("article, main, .post-content, .entry-content, .article-body, .content, .post-body, [class*='article'], [class*='post']").first();
+        if (searchContext.length === 0) {
+            searchContext = $("body").first();
+        }
 
-            // Get content between this H2 and the next H2
-            let content = "";
-            const h3List: string[] = [];
-            let currentElement = $(h2Element).next();
-
-            while (currentElement.length > 0 && !currentElement.is("h2")) {
-                if (currentElement.is("h3")) {
-                    h3List.push(currentElement.text().trim());
-                }
-
-                // Get text content from paragraphs, lists, etc.
-                if (currentElement.is("p, li, blockquote, div")) {
-                    const text = currentElement.text().trim();
-                    if (text) {
-                        content += text + "\n";
-                    }
-                }
-
-                currentElement = currentElement.next();
+        // Try to find headings from table of contents first (more accurate for complex pages)
+        const tocLinks: { text: string; id: string }[] = [];
+        $("nav, .toc, .table-of-contents, [class*='toc'], [class*='index'], [class*='mokuji']").find("a").each((_, el) => {
+            const href = $(el).attr("href");
+            const text = $(el).text().trim();
+            if (href && href.startsWith("#") && text) {
+                tocLinks.push({ text, id: href.slice(1) });
             }
-
-            h2Sections.push({
-                h2: h2Text,
-                content: content.trim().substring(0, 2000), // Limit content length
-                h3List,
-            });
         });
 
-        // Get main content (fallback if no H2 structure)
-        let mainContent = "";
+        // Find all heading elements (h2, h3, h4) to support various page structures
+        const allHeadings = searchContext.find("h2, h3, [class*='heading'], [class*='title']").filter((_, el) => {
+            const $el = $(el);
+            // Filter out navigation, sidebar headings
+            return !$el.closest("nav, header, footer, aside, .sidebar, .menu").length;
+        });
 
-        // Try common article containers
-        const articleSelectors = ["article", "main", ".post-content", ".entry-content", ".article-body", ".content"];
-        let articleElement = null;
+        // Group content by H2 sections
+        let currentH2: { h2: string; content: string; h3List: string[] } | null = null;
 
-        for (const selector of articleSelectors) {
-            const el = $(selector).first();
-            if (el.length > 0) {
-                articleElement = el;
-                break;
+        allHeadings.each((_, element) => {
+            const $heading = $(element);
+            const tagName = element.tagName?.toLowerCase() || "";
+            const headingText = $heading.text().trim();
+
+            if (!headingText || headingText.length < 3) return;
+
+            // Check if this is an H2 or H2-equivalent (by class or role)
+            const isH2 = tagName === "h2" ||
+                $heading.hasClass("h2") ||
+                $heading.attr("role") === "heading" && $heading.attr("aria-level") === "2";
+
+            // Check if this is an H3 or H3-equivalent
+            const isH3 = tagName === "h3" ||
+                tagName === "h4" ||
+                $heading.hasClass("h3") ||
+                $heading.hasClass("h4");
+
+            if (isH2) {
+                // Save previous section if exists
+                if (currentH2) {
+                    h2Sections.push(currentH2);
+                }
+
+                // Get content between this H2 and next heading
+                let content = "";
+                let $next = $heading.next();
+                while ($next.length > 0 && !$next.is("h2") && !$next.hasClass("h2")) {
+                    if ($next.is("p, div, li, blockquote, table, ul, ol") && !$next.find("h2, h3").length) {
+                        const text = $next.text().trim();
+                        if (text.length > 0) {
+                            content += text + "\n";
+                        }
+                    }
+                    $next = $next.next();
+                }
+
+                currentH2 = {
+                    h2: headingText,
+                    content: content.trim().substring(0, 3000),
+                    h3List: [],
+                };
+            } else if (isH3 && currentH2) {
+                currentH2.h3List.push(headingText);
             }
+        });
+
+        // Don't forget the last section
+        if (currentH2) {
+            h2Sections.push(currentH2);
         }
 
-        if (articleElement) {
-            mainContent = articleElement.text().trim();
+        // Fallback: If no structured H2s found or content is very sparse, grab everything
+        let mainContent = "";
+        if (h2Sections.length === 0 || h2Sections.every(s => s.content.length < 50)) {
+            mainContent = searchContext.text().trim();
         } else {
-            mainContent = $("body").text().trim();
+            // Reconstruct meaningful content from sections for the 'content' field
+            mainContent = h2Sections.map(s => `## ${s.h2}\n${s.content}`).join("\n\n");
         }
 
-        // Clean up the content
+        // Final cleanup
         mainContent = mainContent
             .replace(/\s+/g, " ")
             .replace(/\n\s*\n/g, "\n")
             .trim()
-            .substring(0, 10000); // Limit to 10k characters for API
+            .substring(0, 15000); // Increased limit
 
         const result: ScrapeResponse = {
             title,

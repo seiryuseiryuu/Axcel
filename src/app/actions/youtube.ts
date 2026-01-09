@@ -113,99 +113,154 @@ export async function fetchChannelInfo(channelUrl: string): Promise<ActionRespon
     }
 }
 
-export async function fetchChannelVideos(channelId: string, uploadsPlaylistId: string): Promise<ActionResponse<ChannelThumbnail[]>> {
+export async function fetchChannelVideos(
+    channelId: string,
+    uploadsPlaylistId: string,
+    targetCount: number = 10,  // デフォルト10、サムネイル用は40まで指定可能
+    forThumbnail: boolean = false  // サムネイルツール用は緩いフィルタリング
+): Promise<ActionResponse<ChannelThumbnail[]>> {
     if (!YOUTUBE_API_KEY) return { success: false, error: "YouTube API Key is not configured." };
 
     try {
-        // 3. Get Videos from Uploads Playlist
-        const playlistRes = await fetch(
-            `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=50&key=${YOUTUBE_API_KEY}`
-        );
-
-        if (!playlistRes.ok) {
-            console.error("YouTube Playlist API Error:", await playlistRes.text());
-            return { success: false, error: "動画リストの取得に失敗しました。" };
-        }
-
-        const playlistData = await playlistRes.json();
-        if (!playlistData.items || playlistData.items.length === 0) {
-            return { success: true, data: [] };
-        }
-
-        // 4. Fetch detailed video data (REQUIRED for duration check)
-        const videoIds = playlistData.items.map((item: any) => item.snippet.resourceId.videoId).join(',');
-        const videosRes = await fetch(
-            `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoIds}&key=${YOUTUBE_API_KEY}`
-        );
-
-        if (!videosRes.ok) {
-            console.error("YouTube Videos API Error:", await videosRes.text());
-            return { success: false, error: "動画詳細情報の取得に失敗しました（排他フィルター適用不可）。" };
-        }
-
-        const videosData = await videosRes.json();
         const validVideos: ChannelThumbnail[] = [];
+        let nextPageToken: string | undefined = "";
+        let pageCount = 0;
+        const TARGET_COUNT = Math.min(targetCount, 40); // 最大40本まで
+        // 40本取得のため、最大20ページまで探索（50動画×20ページ=1000動画をチェック可能）
+        const MAX_PAGES = forThumbnail ? 20 : 5;
 
-        if (videosData.items) {
-            for (const video of videosData.items) {
-                // Duration parsing (ISO 8601: PT#H#M#S)
-                const duration = video.contentDetails?.duration || "";
-                const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+        console.log(`[fetchChannelVideos] Starting: target=${TARGET_COUNT}, forThumbnail=${forThumbnail}, maxPages=${MAX_PAGES}`);
 
-                let seconds = 0;
-                if (match) {
-                    const h = parseInt((match[1] || "").replace("H", "")) || 0;
-                    const m = parseInt((match[2] || "").replace("M", "")) || 0;
-                    const s = parseInt((match[3] || "").replace("S", "")) || 0;
-                    seconds = h * 3600 + m * 60 + s;
+        while (validVideos.length < TARGET_COUNT && pageCount < MAX_PAGES) {
+            // 3. Get Videos from Uploads Playlist
+            const playlistUrl: string = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=50&key=${YOUTUBE_API_KEY}${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
+            const playlistRes: Response = await fetch(playlistUrl);
+
+            pageCount++;
+
+            if (!playlistRes.ok) {
+                console.error("YouTube Playlist API Error:", await playlistRes.text());
+                // If first page fails, basic error. If subsequent, return what we have?
+                if (validVideos.length === 0) {
+                    return { success: false, error: "動画リストの取得に失敗しました。" };
                 }
+                break; // Stop fetching
+            }
 
-                // STRICT Filter for Shorts:
-                // 1. Duration must be > 65s (Shorts are <= 60s, add buffer)
-                // 2. No "#shorts" or "shorts" in title/description
-                // 3. Skip if duration couldn't be parsed (safety first)
-                const isShort = seconds > 0 && seconds <= 65;
-                const noDuration = seconds === 0 && !match;
-                const title = video.snippet.title?.toLowerCase() || "";
-                const desc = video.snippet.description?.toLowerCase() || "";
+            const playlistData: any = await playlistRes.json();
+            if (!playlistData.items || playlistData.items.length === 0) {
+                break;
+            }
 
-                const hasShortsIndicator =
-                    title.includes("#shorts") ||
-                    title.includes("shorts") ||
-                    desc.includes("#shorts") ||
-                    title.includes("ショート");
+            nextPageToken = playlistData.nextPageToken;
 
-                // Skip if it looks like a Short
-                if (isShort || hasShortsIndicator) {
-                    console.log("[fetchChannelVideos] Skipping short:", video.snippet.title, `(${seconds}s)`);
-                    continue;
+            // 4. Fetch detailed video data (REQUIRED for duration check and live stream detection)
+            const videoIds = playlistData.items.map((item: any) => item.snippet.resourceId.videoId).join(',');
+            const videosRes = await fetch(
+                `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails&id=${videoIds}&key=${YOUTUBE_API_KEY}`
+            );
+
+            if (!videosRes.ok) {
+                console.error("YouTube Videos API Error:", await videosRes.text());
+                break;
+            }
+
+            const videosData = await videosRes.json();
+
+            if (videosData.items) {
+                for (const video of videosData.items) {
+                    // Duration parsing (ISO 8601: PT#H#M#S)
+                    const duration = video.contentDetails?.duration || "";
+                    const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+
+                    let seconds = 0;
+                    if (match) {
+                        const h = parseInt((match[1] || "").replace("H", "")) || 0;
+                        const m = parseInt((match[2] || "").replace("M", "")) || 0;
+                        const s = parseInt((match[3] || "").replace("S", "")) || 0;
+                        seconds = h * 3600 + m * 60 + s;
+                    }
+
+                    // フィルタリング条件
+                    // サムネイル: 90秒以上（ショート確実除外）、2時間以下
+                    // 台本分析: 3分〜30分
+                    const minDuration = forThumbnail ? 90 : 180;  // サムネイル: 90秒（ショート確実除外）
+                    const maxDuration = forThumbnail ? 7200 : 1800; // サムネイル: 2時間、それ以外: 30分
+                    const isValidDuration = seconds >= minDuration && seconds <= maxDuration;
+                    const noDuration = seconds === 0 && !match;
+                    const title = video.snippet.title?.toLowerCase() || "";
+                    const desc = video.snippet.description?.toLowerCase() || "";
+
+                    // ショート動画判定（強化版）
+                    // 1. タイトル・説明に #shorts があるか
+                    // 2. 動画が60秒以下（ショートの定義）
+                    const hasShortsKeyword =
+                        title.includes("#shorts") ||
+                        title.includes("shorts") ||
+                        desc.includes("#shorts") ||
+                        title.includes("ショート") ||
+                        desc.includes("ショート");
+                    const isShortByDuration = seconds > 0 && seconds <= 60;
+                    const isShorts = hasShortsKeyword || isShortByDuration;
+
+                    // ライブ配信チェック（サムネイル用も含め厳格に）
+                    const isLiveStream = video.liveStreamingDetails !== undefined;
+                    const liveBroadcastContent = video.snippet?.liveBroadcastContent;
+                    const isLiveOrUpcoming = liveBroadcastContent === 'live' || liveBroadcastContent === 'upcoming';
+
+                    // ライブ配信関連のキーワードチェック
+                    const hasLiveKeyword =
+                        title.includes("ライブ") ||
+                        title.includes("live配信") ||
+                        title.includes("生配信") ||
+                        title.includes("配信アーカイブ") ||
+                        title.includes("プレミア公開");
+
+                    // ライブ除外（サムネイル用でも現在配信中・今後配信予定は除外）
+                    const shouldExcludeLive = isLiveOrUpcoming || (!forThumbnail && (isLiveStream || hasLiveKeyword));
+
+                    // Skip条件
+                    const shouldSkip = !isValidDuration || isShorts || shouldExcludeLive || noDuration;
+
+                    if (shouldSkip) {
+                        console.log("[fetchChannelVideos] Skipping:", video.snippet.title,
+                            `(${seconds}s, shorts:${isShorts}, live:${isLiveOrUpcoming || isLiveStream})`);
+                        continue;
+                    }
+
+                    // Skip if we couldn't determine duration
+                    if (noDuration) {
+                        console.log("[fetchChannelVideos] Skipping video with no duration:", video.snippet.title);
+                        continue;
+                    }
+
+                    const thumb = video.snippet.thumbnails.maxres?.url
+                        || video.snippet.thumbnails.high?.url
+                        || video.snippet.thumbnails.medium?.url
+                        || video.snippet.thumbnails.standard?.url;
+
+                    if (thumb) {
+                        validVideos.push({
+                            id: video.id,
+                            video_id: video.id,
+                            video_title: video.snippet.title,
+                            thumbnail_url: thumb,
+                            channel_name: video.snippet.channelTitle
+                        });
+                    }
+
+                    if (validVideos.length >= TARGET_COUNT) break;
                 }
+            }
 
-                // Skip if we couldn't determine duration (might be a short)
-                if (noDuration) {
-                    console.log("[fetchChannelVideos] Skipping video with no duration:", video.snippet.title);
-                    continue;
-                }
-
-                const thumb = video.snippet.thumbnails.maxres?.url
-                    || video.snippet.thumbnails.high?.url
-                    || video.snippet.thumbnails.medium?.url
-                    || video.snippet.thumbnails.standard?.url;
-
-                if (thumb) {
-                    validVideos.push({
-                        id: video.id,
-                        video_id: video.id,
-                        video_title: video.snippet.title,
-                        thumbnail_url: thumb,
-                        channel_name: video.snippet.channelTitle
-                    });
-                }
-
-                if (validVideos.length >= 20) break;
+            // If we have no next page, stop
+            if (!nextPageToken) {
+                console.log(`[fetchChannelVideos] No more pages. Total valid: ${validVideos.length}`);
+                break;
             }
         }
 
+        console.log(`[fetchChannelVideos] Completed: ${validVideos.length}/${TARGET_COUNT} videos after ${pageCount} pages`);
         return { success: true, data: validVideos };
 
     } catch (e: any) {

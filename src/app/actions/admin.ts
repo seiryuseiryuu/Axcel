@@ -43,7 +43,9 @@ export async function updateUserAccess(userId: string, months: number | null): P
     // To disable, we'd probably use a different logic or pass -1.
     // Let's assume > 0 or null means ENABLE.
 
-    const { error } = await supabase
+    // Use Admin Client to bypass RLS when updating other user's profile
+    const adminClient = createAdminClient();
+    const { error } = await adminClient
         .from("profiles")
         .update({
             studio_enabled: true,
@@ -54,6 +56,7 @@ export async function updateUserAccess(userId: string, months: number | null): P
     if (error) return { success: false, error: error.message };
 
     revalidatePath("/admin/users");
+    revalidatePath("/admin/students");
     return { success: true };
 }
 
@@ -79,8 +82,9 @@ export async function updateUserAccessByDate(userId: string, expirationDate: str
         return { success: false, error: "管理者権限が必要です" };
     }
 
-    // Update target user's profile
-    const { error } = await supabase
+    // Use Admin Client to bypass RLS when updating other user's profile
+    const adminClient = createAdminClient();
+    const { error } = await adminClient
         .from("profiles")
         .update({
             studio_enabled: true,
@@ -91,6 +95,7 @@ export async function updateUserAccessByDate(userId: string, expirationDate: str
     if (error) return { success: false, error: error.message };
 
     revalidatePath("/admin/users");
+    revalidatePath("/admin/students");
     return { success: true };
 }
 
@@ -142,7 +147,12 @@ export async function createUser(formData: FormData): Promise<CreateUserResult> 
     });
 
     if (createError || !newUser) {
-        return { success: false, error: `ユーザー作成エラー: ${createError?.message}` };
+        console.error("User creation error:", createError);
+        let errorMessage = createError?.message || "Unknown error";
+        if (errorMessage.toLowerCase().includes("invalid api key")) {
+            errorMessage += " (Hint: Please check if SUPABASE_SERVICE_ROLE_KEY is correctly set in Vercel environment variables. It might be invalid or contain spaces.)";
+        }
+        return { success: false, error: `ユーザー作成エラー: ${errorMessage}` };
     }
 
     // 2. Calculate expiration based on duration type
@@ -170,7 +180,7 @@ export async function createUser(formData: FormData): Promise<CreateUserResult> 
         .from("profiles")
         .upsert({
             id: newUser.id,
-            email: email,
+            // email: email, // REMOVED: profiles table does not have email column
             role: "student",
             display_name: displayName,
             studio_enabled: true,
@@ -185,7 +195,7 @@ export async function createUser(formData: FormData): Promise<CreateUserResult> 
         return { success: false, error: `プロファイル設定エラー: ${profileError.message}` };
     }
 
-    revalidatePath("/admin/users");
+    revalidatePath("/admin/students");
     return { success: true, userId: newUser.id };
 }
 
@@ -240,8 +250,9 @@ export async function disableUserAccess(userId: string): Promise<{ success: bool
         return { success: false, error: "管理者権限が必要です" };
     }
 
-    // Update target user's profile - disable studio access
-    const { error } = await supabase
+    // Use Admin Client to bypass RLS when updating other user's profile
+    const adminClient = createAdminClient();
+    const { error } = await adminClient
         .from("profiles")
         .update({
             studio_enabled: false,
@@ -252,5 +263,37 @@ export async function disableUserAccess(userId: string): Promise<{ success: bool
     if (error) return { success: false, error: error.message };
 
     revalidatePath("/admin/users");
+    revalidatePath("/admin/students");
+    return { success: true };
+}
+
+/**
+ * Delete a user account (Admin only)
+ */
+export async function deleteUser(userId: string): Promise<{ success: boolean; error?: string }> {
+    const supabase = await createClient();
+
+    // Verify current user is admin
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "認証が必要です" };
+
+    const { data: adminProfile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+    if (!adminProfile || adminProfile.role !== "admin") {
+        return { success: false, error: "管理者権限が必要です" };
+    }
+
+    // Use Admin Client to delete user from Auth (cascades to profiles)
+    const adminClient = createAdminClient();
+    const { error } = await adminClient.auth.admin.deleteUser(userId);
+
+    if (error) return { success: false, error: error.message };
+
+    revalidatePath("/admin/users");
+    revalidatePath("/admin/students");
     return { success: true };
 }

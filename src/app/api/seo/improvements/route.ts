@@ -7,7 +7,7 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
 export async function POST(req: NextRequest) {
   try {
     const body: ImprovementsRequest = await req.json();
-    const { readerAnalysis, structureAnalyses } = body;
+    const { readerAnalysis, structureAnalyses, modificationInstructions } = body;
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
@@ -37,6 +37,12 @@ ${structureSummary}
 3. 想定読者のニーズに基づき、追加すべき内容・削除すべき内容を提案してください。
    - **削除すべき内容（重要）**: 読者にとって不要な情報、冗長な表現、SEOで評価されない内容は、明確に「削除」として提案してください。「特になし」は極力避け、何か削れる部分を見つけてください。
 
+${modificationInstructions ? `
+【修正指示（ユーザーからの追加要望）】
+ユーザーから以下の修正指示がありました。これを最優先して提案を調整してください：
+"${modificationInstructions}"
+` : ""}
+
 【出力形式】以下のJSON形式で出力（コードブロックなしで純粋なJSONのみ）:
 {
   "axes": [
@@ -60,9 +66,22 @@ ${structureSummary}
     const result = await model.generateContent(prompt);
     const text = result.response.text();
 
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    // Remove markdown code blocks if present
+    let cleanedText = text.trim();
+    if (cleanedText.startsWith("```json")) {
+      cleanedText = cleanedText.slice(7);
+    } else if (cleanedText.startsWith("```")) {
+      cleanedText = cleanedText.slice(3);
+    }
+    if (cleanedText.endsWith("```")) {
+      cleanedText = cleanedText.slice(0, -3);
+    }
+    cleanedText = cleanedText.trim();
+
+    const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      throw new Error("Failed to parse AI response");
+      console.error("Failed to parse improvements AI response:", text.substring(0, 500));
+      throw new Error("改善提案の解析に失敗しました。もう一度お試しください。");
     }
 
     const improvements: ImprovementSuggestions = JSON.parse(jsonMatch[0]);

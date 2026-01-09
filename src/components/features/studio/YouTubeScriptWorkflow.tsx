@@ -6,10 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     ArrowRight, ArrowLeft, Check, Loader2, Sparkles,
-    Video, Users, Search, ListChecks, FileText, Edit3, Square, CheckSquare, Eye, Code,
+    Video, Users, Search, ListChecks, FileText, Edit3, Eye, Code,
     ChevronDown, ChevronUp
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -22,29 +21,49 @@ import {
     generateImprovements,
     writeScript,
     extractThumbnailText,
-    analyzeChannelFromUrls
+    analyzeChannelFromChannelUrl,
+    analyzeChannelFromUrls // Keep for backward compatibility if needed, though we use the new one primarily
 } from "@/app/actions/scriptWorkflow";
 
-export interface ChannelStyle {
-    name?: string;
-    title?: string;
-    speakingStyle?: string;
-    firstPerson?: string;
-    secondPerson?: string;
-    endings?: string[];
-    tone?: string;
-    catchphrases?: string[];
+interface ChannelStyle {
+    name: string;
+    speakingStyle: string;
+    firstPerson: string;
+    secondPerson: string;
+    endings: string[];
+    tone: string;
     expertise?: string;
 }
 
 interface YouTubeScriptWorkflowProps {
-    onError: (msg: string) => void;
+    onError: (error: string) => void;
+}
+
+interface ImprovementAxis {
+    axisName: string;
+    description: string;
+    example: string;
+    reason: string;
+    selected: boolean;
+}
+
+interface ImprovementData {
+    improvementAxes: ImprovementAxis[];
+    contentStructure: {
+        opening: { hookType: string; suggestedHook: string };
+        preProblem: { commonMisconception: string; truthReveal: string };
+        mainContent: { structure: string; keyPoints: string[] };
+        ending: { registrationTarget: string; registrationBenefit: string; callToAction: string };
+    };
+    gapAnalysis: { originalVideoIssue: string; proposedSolution: string };
 }
 
 interface WorkflowState {
     step: number;
     // STEP1: Channel Analysis & Reference Video
-    channelVideoUrls: string[]; // User's channel videos (max 3)
+    channelUrl: string;
+    channelVideoUrls: string[]; // Keep for compatibility / state shape
+    analyzedVideos: { title: string; thumbnail: string; url: string }[];
     channelStyle: ChannelStyle | null;
     referenceUrl: string;
     thumbnailText: string;
@@ -55,69 +74,89 @@ interface WorkflowState {
     viewerNeeds: string;
     // STEP4
     openingAnalysis: string;
-    // STEP5
-    ctaContent: string;
+    // STEP5 - CTA分割入力
+    ctaRegistrationType: string; // 登録先（LINE/チャンネル登録/メルマガなど）
+    ctaBenefit: string; // ユーザーにとってのメリット
+    ctaContent: string; // 古い形式との互換性用
     improvements: { id: string; section: string; type: 'add' | 'remove'; content: string; reason: string; selected: boolean }[];
+    improvementData: ImprovementData | null; // 新形式のデータ
     // STEP6
     finalScript: string;
 }
 
 const STEPS = [
-    { num: 1, title: "参考動画入力", icon: Video, description: "分析したいYouTube動画のURLを入力" },
-    { num: 2, title: "構成分解", icon: FileText, description: "動画の字幕を取得して構成を詳細分析" },
-    { num: 3, title: "視聴者分析", icon: Users, description: "想定視聴者のレベル・悩み・リテラシーを分析" },
-    { num: 4, title: "動画分析", icon: Search, description: "参考動画の冒頭・前提・本編を分析" },
-    { num: 5, title: "改善提案", icon: ListChecks, description: "追加・削除すべき内容を提案" },
-    { num: 6, title: "台本作成", icon: Edit3, description: "分析結果をもとに台本をライティング" },
+    { num: 1, title: "チャンネル・参考動画", icon: Video, description: "あなたのチャンネルと参考にしたい動画のURLを入力してください" },
+    { num: 2, title: "構成分解", icon: ListChecks, description: "参考動画の構成を分析・分解します" },
+    { num: 3, title: "視聴者分析", icon: Users, description: "ターゲットとなる視聴者のニーズや悩みを分析します" },
+    { num: 4, title: "動画分析", icon: Search, description: "動画の冒頭（フック）や工夫点を分析します" },
+    { num: 5, title: "改善提案", icon: Sparkles, description: "あなたのチャンネルらしさを加えるための改善案を生成します" },
+    { num: 6, title: "台本作成", icon: FileText, description: "分析結果を元に、新しい動画の台本を作成します" },
 ];
 
-// Markdown/Raw切り替え可能な結果表示コンポーネント
-function ResultDisplay({
-    content,
-    onChange,
-    label,
-}: {
-    content: string;
-    onChange: (value: string) => void;
-    label: string;
-}) {
-    const [viewMode, setViewMode] = useState<"preview" | "edit">("preview");
+function ResultDisplay({ content, onChange, label }: { content: string, onChange: (v: string) => void, label: string }) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
 
     return (
-        <div className="space-y-3">
+        <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2">
             <div className="flex items-center justify-between">
-                <Label className="text-base font-bold text-foreground">{label}</Label>
-                <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "preview" | "edit")}>
-                    <TabsList className="h-9">
-                        <TabsTrigger value="preview" className="text-xs px-3 h-7">
-                            <Eye className="w-3.5 h-3.5 mr-1.5" />
-                            プレビュー
-                        </TabsTrigger>
-                        <TabsTrigger value="edit" className="text-xs px-3 h-7">
-                            <Code className="w-3.5 h-3.5 mr-1.5" />
-                            編集
-                        </TabsTrigger>
-                    </TabsList>
-                </Tabs>
+                <Label className="text-base font-bold text-foreground flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    {label}
+                </Label>
+                <div className="flex bg-muted rounded-lg p-0.5 border">
+                    <button
+                        onClick={() => setViewMode("preview")}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1 ${viewMode === "preview"
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                            }`}
+                    >
+                        <Eye className="w-3.5 h-3.5" />
+                        プレビュー
+                    </button>
+                    <button
+                        onClick={() => setViewMode("source")}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1 ${viewMode === "source"
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                            }`}
+                    >
+                        <Code className="w-3.5 h-3.5" />
+                        ソース
+                    </button>
+                </div>
             </div>
 
             {viewMode === "preview" ? (
-                <div className="border border-border/60 rounded-xl p-6 bg-card min-h-[500px] max-h-[700px] overflow-y-auto shadow-sm">
-                    <article className="prose prose-sm md:prose-base dark:prose-invert max-w-none 
-                        prose-headings:text-foreground prose-headings:font-bold prose-p:text-muted-foreground prose-p:leading-relaxed
-                        prose-li:text-muted-foreground prose-strong:text-foreground prose-strong:font-semibold
-                        prose-blockquote:border-l-4 prose-blockquote:border-primary/50 prose-blockquote:bg-muted/30 prose-blockquote:py-1 prose-blockquote:px-4 prose-blockquote:rounded-r-lg prose-blockquote:not-italic
-                        ">
+                <div className="border border-border/60 rounded-xl overflow-hidden bg-muted/20">
+                    <div className="bg-background/50 p-2 flex justify-end border-b">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                                setViewMode("source");
+                                setIsEditing(true);
+                            }}
+                            className="h-7 text-xs"
+                        >
+                            <Edit3 className="w-3.5 h-3.5 mr-1.5" />
+                            編集する
+                        </Button>
+                    </div>
+                    <article className="prose prose-sm dark:prose-invert max-w-none p-6 bg-background">
                         <MarkdownRenderer content={content} />
                     </article>
                 </div>
             ) : (
-                <Textarea
-                    className="min-h-[500px] font-mono text-sm leading-relaxed p-4 bg-muted/20 focus:bg-background transition-colors"
-                    value={content}
-                    onChange={(e) => onChange(e.target.value)}
-                    placeholder="ここに分析結果や台本が表示されます..."
-                />
+                <div className="border border-border/60 rounded-xl overflow-hidden shadow-sm transition-all focus-within:ring-1 focus-within:ring-primary/20">
+                    <Textarea
+                        className="min-h-[400px] font-mono text-sm leading-relaxed border-0 focus-visible:ring-0 p-6 resize-y bg-background"
+                        value={content}
+                        onChange={(e) => onChange(e.target.value)}
+                        placeholder={`${label}がここに表示されます`}
+                    />
+                </div>
             )}
         </div>
     );
@@ -130,7 +169,9 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
 
     const [workflow, setWorkflow] = useState<WorkflowState>({
         step: 1,
+        channelUrl: "",
         channelVideoUrls: ["", "", ""],
+        analyzedVideos: [],
         channelStyle: null,
         referenceUrl: "",
         thumbnailText: "",
@@ -138,8 +179,11 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
         originalTranscript: "",
         viewerNeeds: "",
         openingAnalysis: "",
+        ctaRegistrationType: "",
+        ctaBenefit: "",
         ctaContent: "",
         improvements: [],
+        improvementData: null,
         finalScript: "",
     });
 
@@ -151,18 +195,22 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
 
     // Channel Analysis
     const runChannelAnalysis = () => {
-        const urls = workflow.channelVideoUrls.filter(u => u.trim());
-        if (urls.length === 0) {
-            toast({ title: "エラー", description: "チャンネル動画のURLを少なくとも1つ入力してください", variant: "destructive" });
+        if (!workflow.channelUrl.trim()) {
+            toast({ title: "エラー", description: "チャンネルURLを入力してください", variant: "destructive" });
             return;
         }
 
         startTransition(async () => {
-            const result = await analyzeChannelFromUrls(urls);
+            const result = await analyzeChannelFromChannelUrl(workflow.channelUrl);
+
             if (result.success && result.data) {
                 // @ts-ignore
-                setWorkflow(prev => ({ ...prev, channelStyle: result.data }));
-                toast({ title: "チャンネル分析完了", description: "スタイル情報を取得しました" });
+                setWorkflow(prev => ({
+                    ...prev,
+                    channelStyle: result.data,
+                    analyzedVideos: result.analyzedVideos || []
+                }));
+                toast({ title: "チャンネル分析完了", description: "最新動画からスタイルを抽出しました" });
             } else {
                 onError(result.error || "チャンネル分析に失敗しました");
             }
@@ -266,21 +314,56 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
 
     // STEP5: 改善提案
     const runImprovements = () => {
+        // CTA情報を結合
+        const ctaInfo = workflow.ctaRegistrationType || workflow.ctaBenefit
+            ? `登録先: ${workflow.ctaRegistrationType || '未指定'}\nユーザーへのメリット: ${workflow.ctaBenefit || '未指定'}`
+            : workflow.ctaContent || undefined;
+
         startTransition(async () => {
             const result = await generateImprovements(
                 workflow.structureAnalysis,
                 workflow.viewerNeeds,
                 workflow.openingAnalysis,
-                workflow.ctaContent || undefined
+                ctaInfo
             );
 
             if (result.success && result.data) {
+                console.log("[runImprovements] Raw result:", result.data.substring(0, 500));
                 try {
                     const cleanJson = result.data.replace(/```json/g, "").replace(/```/g, "").trim();
+                    console.log("[runImprovements] Clean JSON:", cleanJson.substring(0, 500));
                     const parsed = JSON.parse(cleanJson);
-                    const improvements: WorkflowState['improvements'] = [];
+                    console.log("[runImprovements] Parsed keys:", Object.keys(parsed));
 
-                    if (parsed.improvements && Array.isArray(parsed.improvements)) {
+                    // 新形式（improvementAxes）の処理
+                    if (parsed.improvementAxes && Array.isArray(parsed.improvementAxes)) {
+                        console.log("[runImprovements] Using NEW format (improvementAxes)");
+                        const axesWithSelection = (parsed.improvementAxes || []).map((axis: any) => ({
+                            ...axis,
+                            axisName: axis.axisName || '改善項目',
+                            description: axis.description || '',
+                            example: axis.example || '',
+                            reason: axis.reason || '',
+                            selected: true // デフォルトで全て選択
+                        }));
+
+                        // デフォルト値を設定して安全にセット
+                        const safeImprovementData = {
+                            improvementAxes: axesWithSelection,
+                            contentStructure: parsed.contentStructure || null,
+                            gapAnalysis: parsed.gapAnalysis || null
+                        };
+
+                        setWorkflow(prev => ({
+                            ...prev,
+                            improvementData: safeImprovementData,
+                            improvements: [] // 新形式では使わない
+                        }));
+                        toast({ title: "改善提案完了", description: "改善の軸と構成提案を確認してください" });
+                    }
+                    // 古い形式（improvements配列）のフォールバック
+                    else if (parsed.improvements && Array.isArray(parsed.improvements)) {
+                        const improvements: WorkflowState['improvements'] = [];
                         parsed.improvements.forEach((section: any) => {
                             const sectionName = section.section || "その他";
                             section.additions?.forEach((item: any, i: number) => {
@@ -288,7 +371,7 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
                                     id: `${sectionName}-add-${i}`,
                                     section: sectionName,
                                     type: 'add',
-                                    content: typeof item === 'string' ? item : item.content, // Handle both string and object
+                                    content: typeof item === 'string' ? item : item.content,
                                     reason: item.reason || "",
                                     selected: false,
                                 });
@@ -304,38 +387,25 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
                                 });
                             });
                         });
-                    } else {
-                        // Fallback for old format
-                        parsed.additions?.forEach((item: any, i: number) => {
-                            improvements.push({
-                                id: `add-${i}`,
-                                section: "全般",
-                                type: 'add',
-                                content: item.content,
-                                reason: item.reason || "",
-                                selected: false,
-                            });
-                        });
-                        parsed.removals?.forEach((item: any, i: number) => {
-                            improvements.push({
-                                id: `rem-${i}`,
-                                section: "全般",
-                                type: 'remove',
-                                content: item.content,
-                                reason: item.reason || "",
-                                selected: false,
-                            });
-                        });
-                    }
 
-                    setWorkflow(prev => ({ ...prev, improvements }));
-                    toast({ title: "改善提案完了", description: "採用するものを選択して「確認して次へ」をクリックしてください" });
-                } catch {
+                        setWorkflow(prev => ({ ...prev, improvements, improvementData: null }));
+                        toast({ title: "改善提案完了", description: "採用するものを選択して「確認して次へ」をクリックしてください" });
+                    } else {
+                        // どちらの形式でもない場合、生データを表示
+                        setWorkflow(prev => ({
+                            ...prev,
+                            improvements: [{ id: 'raw', section: '全般', type: 'add', content: result.data!, reason: '', selected: false }],
+                            improvementData: null
+                        }));
+                    }
+                } catch (e) {
+                    console.error("JSON parse error:", e);
                     setWorkflow(prev => ({
                         ...prev,
                         improvements: [
                             { id: 'raw', section: '全般', type: 'add', content: result.data!, reason: '', selected: false }
-                        ]
+                        ],
+                        improvementData: null
                     }));
                 }
             } else {
@@ -391,7 +461,7 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
             case 2: return !!workflow.structureAnalysis;
             case 3: return !!workflow.viewerNeeds;
             case 4: return !!workflow.openingAnalysis;
-            case 5: return workflow.improvements.length > 0;
+            case 5: return workflow.improvements.length > 0 || workflow.improvementData !== null;
             case 6: return !!workflow.finalScript;
             default: return false;
         }
@@ -450,39 +520,54 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
                                         あなたのチャンネル分析（任意）
                                     </h3>
                                     <p className="text-xs text-muted-foreground">
-                                        過去の動画を分析して、あなたの話し方やスタイルを台本に反映させます（最大3つ）。
+                                        過去の動画を分析して、あなたの話し方やスタイルを台本に反映させます（自動で最新3件を取得）
                                     </p>
                                 </div>
                                 <div className="space-y-2">
-                                    {workflow.channelVideoUrls.map((url, i) => (
+                                    <Label>チャンネルURL / ハンドル名</Label>
+                                    <div className="flex gap-2">
                                         <Input
-                                            key={i}
-                                            placeholder={`チャンネル動画 URL ${i + 1}`}
-                                            value={url}
-                                            onChange={(e) => {
-                                                const newUrls = [...workflow.channelVideoUrls];
-                                                newUrls[i] = e.target.value;
-                                                setWorkflow(prev => ({ ...prev, channelVideoUrls: newUrls }));
-                                            }}
-                                            className="bg-background"
+                                            placeholder="例: @user-handle または https://www.youtube.com/@..."
+                                            value={workflow.channelUrl}
+                                            onChange={e => setWorkflow(prev => ({ ...prev, channelUrl: e.target.value }))}
                                         />
-                                    ))}
+                                        <Button onClick={runChannelAnalysis} disabled={isPending}>
+                                            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                                            <span className="ml-2">分析する</span>
+                                        </Button>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                        ※URLまたは「@」から始まるハンドル名を入力してください。最新の動画3本を自動取得して分析します。
+                                    </p>
                                 </div>
-                                <Button onClick={runChannelAnalysis} disabled={isPending} variant="outline" className="w-full">
-                                    {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                                    チャンネルスタイルを分析する
-                                </Button>
+
+                                {/* Analyzed Videos Display */}
+                                {workflow.analyzedVideos.length > 0 && (
+                                    <div className="mt-4 p-3 bg-muted/30 rounded-lg">
+                                        <Label className="text-xs text-muted-foreground mb-2 block">分析に使用した動画</Label>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {workflow.analyzedVideos.map((v, i) => (
+                                                <div key={i} className="space-y-1">
+                                                    <div className="aspect-video relative rounded overflow-hidden border">
+                                                        <img src={v.thumbnail} alt={v.title} className="w-full h-full object-cover" />
+                                                    </div>
+                                                    <p className="text-[10px] text-muted-foreground line-clamp-2 leading-tight">{v.title}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {workflow.channelStyle && (
-                                    <div className="bg-background p-4 rounded border text-sm space-y-2 animate-in fade-in slide-in-from-top-2">
-                                        <div className="font-medium text-green-600 flex items-center gap-2">
-                                            <Check className="w-4 h-4" /> 分析完了
+                                    <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-800">
+                                        <div className="flex items-center gap-2 mb-2 text-green-700 dark:text-green-400 font-semibold">
+                                            <Check className="w-4 h-4" />
+                                            <span>分析完了: {workflow.channelStyle.name || "チャンネル"}</span>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                                            <div><span className="font-semibold">話し方:</span> {workflow.channelStyle.speakingStyle}</div>
-                                            <div><span className="font-semibold">一人称:</span> {workflow.channelStyle.firstPerson}</div>
-                                            <div><span className="font-semibold">トーン:</span> {workflow.channelStyle.tone}</div>
-                                            <div><span className="font-semibold">権威性:</span> {workflow.channelStyle.expertise || "なし"}</div>
+                                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-green-800 dark:text-green-300">
+                                            <p>🔍 <strong>一人称:</strong> {workflow.channelStyle.firstPerson}</p>
+                                            <p>🗣 <strong>語尾:</strong> {workflow.channelStyle.endings?.slice(0, 3).join(", ")}</p>
+                                            <p>🎵 <strong>トーン:</strong> {workflow.channelStyle.tone}</p>
                                         </div>
                                     </div>
                                 )}
@@ -609,28 +694,298 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
                                 )}
                             </div>
 
-                            {/* CTA Input */}
-                            <div className="space-y-2">
-                                <Label>この動画のゴール（CTA：Call To Action）</Label>
-                                <Input
-                                    placeholder="例：公式LINEに登録させる、チャンネル登録を促す、メルマガへ誘導 など"
-                                    value={workflow.ctaContent}
-                                    onChange={(e) => setWorkflow(prev => ({ ...prev, ctaContent: e.target.value }))}
-                                />
+                            {/* CTA Input - 分割入力 */}
+                            <div className="space-y-4 border rounded-lg p-4 bg-muted/10">
+                                <Label className="text-base font-semibold flex items-center gap-2">
+                                    <Sparkles className="w-4 h-4 text-primary" />
+                                    この動画のゴール（CTA設定）
+                                </Label>
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="ctaRegistrationType">登録先</Label>
+                                        <Input
+                                            id="ctaRegistrationType"
+                                            placeholder="例：公式LINE、チャンネル登録、メルマガ"
+                                            value={workflow.ctaRegistrationType}
+                                            onChange={(e) => setWorkflow(prev => ({ ...prev, ctaRegistrationType: e.target.value }))}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="ctaBenefit">ユーザーへのメリット</Label>
+                                        <Input
+                                            id="ctaBenefit"
+                                            placeholder="例：限定動画が見れる、最新情報が届く、無料相談ができる"
+                                            value={workflow.ctaBenefit}
+                                            onChange={(e) => setWorkflow(prev => ({ ...prev, ctaBenefit: e.target.value }))}
+                                        />
+                                    </div>
+                                </div>
                                 <p className="text-xs text-muted-foreground">
-                                    動画の最後に視聴者に何をしてほしいかを設定すると、改善提案の精度が向上します。
+                                    視聴者に何をしてもらいたいか、そのメリットは何かを設定すると、改善提案とCTAの精度が向上します。
                                 </p>
                             </div>
 
-                            <Button onClick={runImprovements} disabled={isPending} className="w-full">
+                            <Button onClick={runImprovements} disabled={isPending} className="w-full" variant={workflow.improvementData ? "outline" : "default"}>
                                 {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                                改善提案を生成する
+                                {workflow.improvementData ? "改善提案を再生成する" : "改善提案を生成する"}
                             </Button>
 
-                            {/* Improvements Table Display */}
-                            {workflow.improvements.length > 0 && (
+                            {/* 新形式: improvementAxes表示 */}
+                            {workflow.improvementData && (
+                                <div className="space-y-6">
+                                    {/* 改善の軸 */}
+                                    {workflow.improvementData.improvementAxes && workflow.improvementData.improvementAxes.length > 0 && (
+                                        <Card>
+                                            <CardHeader className="py-3 bg-primary/10 border-b">
+                                                <CardTitle className="text-base font-bold">改善の軸</CardTitle>
+                                                <CardDescription>提案された改善アプローチを確認してください</CardDescription>
+                                            </CardHeader>
+                                            <CardContent className="p-4 space-y-4">
+                                                {workflow.improvementData.improvementAxes.map((axis, i) => (
+                                                    <div key={i} className="border rounded-lg p-4 bg-background hover:bg-muted/30 transition-colors">
+                                                        <div className="flex items-start justify-between gap-4">
+                                                            <div className="flex-1 space-y-2">
+                                                                <Input
+                                                                    value={axis.axisName || ''}
+                                                                    onChange={(e) => {
+                                                                        const newAxes = [...workflow.improvementData!.improvementAxes];
+                                                                        newAxes[i] = { ...newAxes[i], axisName: e.target.value };
+                                                                        setWorkflow(prev => ({
+                                                                            ...prev,
+                                                                            improvementData: { ...prev.improvementData!, improvementAxes: newAxes }
+                                                                        }));
+                                                                    }}
+                                                                    placeholder="改善の軸名"
+                                                                    className="font-semibold text-primary"
+                                                                />
+                                                                <Textarea
+                                                                    value={axis.description || ''}
+                                                                    onChange={(e) => {
+                                                                        const newAxes = [...workflow.improvementData!.improvementAxes];
+                                                                        newAxes[i] = { ...newAxes[i], description: e.target.value };
+                                                                        setWorkflow(prev => ({
+                                                                            ...prev,
+                                                                            improvementData: { ...prev.improvementData!, improvementAxes: newAxes }
+                                                                        }));
+                                                                    }}
+                                                                    placeholder="改善の説明"
+                                                                    className="text-sm min-h-[60px]"
+                                                                />
+                                                                {axis.example && <p className="text-sm mt-2"><strong>例：</strong>{axis.example}</p>}
+                                                                {axis.reason && <p className="text-xs text-muted-foreground mt-1">💡 {axis.reason}</p>}
+                                                            </div>
+                                                            <div
+                                                                onClick={() => {
+                                                                    const newAxes = [...workflow.improvementData!.improvementAxes];
+                                                                    newAxes[i] = { ...newAxes[i], selected: !newAxes[i].selected };
+                                                                    setWorkflow(prev => ({
+                                                                        ...prev,
+                                                                        improvementData: { ...prev.improvementData!, improvementAxes: newAxes }
+                                                                    }));
+                                                                }}
+                                                                className={`w-6 h-6 rounded cursor-pointer flex items-center justify-center transition-all shrink-0 ${axis.selected
+                                                                    ? "bg-primary text-primary-foreground"
+                                                                    : "border border-muted-foreground text-transparent"
+                                                                    }`}
+                                                            >
+                                                                <Check className="w-4 h-4" />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </CardContent>
+                                        </Card>
+                                    )}
+
+                                    {/* 構成提案 */}
+                                    {workflow.improvementData.contentStructure && (
+                                        <Card>
+                                            <CardHeader className="py-3 bg-secondary/30 border-b">
+                                                <CardTitle className="text-base font-bold">構成提案</CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="p-4 space-y-4">
+                                                <div className="grid gap-4 md:grid-cols-2">
+                                                    {workflow.improvementData.contentStructure.opening && (
+                                                        <div className="border rounded p-3 space-y-2">
+                                                            <h5 className="font-semibold text-sm">オープニング</h5>
+                                                            <Input
+                                                                value={workflow.improvementData.contentStructure.opening.hookType || ''}
+                                                                onChange={(e) => setWorkflow(prev => ({
+                                                                    ...prev,
+                                                                    improvementData: {
+                                                                        ...prev.improvementData!,
+                                                                        contentStructure: {
+                                                                            ...prev.improvementData!.contentStructure,
+                                                                            opening: { ...prev.improvementData!.contentStructure.opening, hookType: e.target.value }
+                                                                        }
+                                                                    }
+                                                                }))}
+                                                                placeholder="フックタイプ"
+                                                                className="text-xs"
+                                                            />
+                                                            <Textarea
+                                                                value={workflow.improvementData.contentStructure.opening.suggestedHook || ''}
+                                                                onChange={(e) => setWorkflow(prev => ({
+                                                                    ...prev,
+                                                                    improvementData: {
+                                                                        ...prev.improvementData!,
+                                                                        contentStructure: {
+                                                                            ...prev.improvementData!.contentStructure,
+                                                                            opening: { ...prev.improvementData!.contentStructure.opening, suggestedHook: e.target.value }
+                                                                        }
+                                                                    }
+                                                                }))}
+                                                                placeholder="具体的なフック文言"
+                                                                className="text-sm min-h-[60px]"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    {workflow.improvementData.contentStructure.preProblem && (
+                                                        <div className="border rounded p-3 space-y-2">
+                                                            <h5 className="font-semibold text-sm">問題提起</h5>
+                                                            <Input
+                                                                value={workflow.improvementData.contentStructure.preProblem.commonMisconception || ''}
+                                                                onChange={(e) => setWorkflow(prev => ({
+                                                                    ...prev,
+                                                                    improvementData: {
+                                                                        ...prev.improvementData!,
+                                                                        contentStructure: {
+                                                                            ...prev.improvementData!.contentStructure,
+                                                                            preProblem: { ...prev.improvementData!.contentStructure.preProblem, commonMisconception: e.target.value }
+                                                                        }
+                                                                    }
+                                                                }))}
+                                                                placeholder="視聴者の誤解"
+                                                                className="text-xs"
+                                                            />
+                                                            <Textarea
+                                                                value={workflow.improvementData.contentStructure.preProblem.truthReveal || ''}
+                                                                onChange={(e) => setWorkflow(prev => ({
+                                                                    ...prev,
+                                                                    improvementData: {
+                                                                        ...prev.improvementData!,
+                                                                        contentStructure: {
+                                                                            ...prev.improvementData!.contentStructure,
+                                                                            preProblem: { ...prev.improvementData!.contentStructure.preProblem, truthReveal: e.target.value }
+                                                                        }
+                                                                    }
+                                                                }))}
+                                                                placeholder="真実・常識を覆す内容"
+                                                                className="text-sm min-h-[60px]"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {workflow.improvementData.contentStructure.mainContent && (
+                                                    <div className="border rounded p-3 space-y-2">
+                                                        <h5 className="font-semibold text-sm">本編構成</h5>
+                                                        <Input
+                                                            value={workflow.improvementData.contentStructure.mainContent.structure || ''}
+                                                            onChange={(e) => setWorkflow(prev => ({
+                                                                ...prev,
+                                                                improvementData: {
+                                                                    ...prev.improvementData!,
+                                                                    contentStructure: {
+                                                                        ...prev.improvementData!.contentStructure,
+                                                                        mainContent: { ...prev.improvementData!.contentStructure.mainContent, structure: e.target.value }
+                                                                    }
+                                                                }
+                                                            }))}
+                                                            placeholder="構成形式（例: ポイント3つ）"
+                                                            className="text-xs"
+                                                        />
+                                                        <Textarea
+                                                            value={workflow.improvementData.contentStructure.mainContent.keyPoints?.join('\n') || ''}
+                                                            onChange={(e) => setWorkflow(prev => ({
+                                                                ...prev,
+                                                                improvementData: {
+                                                                    ...prev.improvementData!,
+                                                                    contentStructure: {
+                                                                        ...prev.improvementData!.contentStructure,
+                                                                        mainContent: { ...prev.improvementData!.contentStructure.mainContent, keyPoints: e.target.value.split('\n').filter(p => p.trim()) }
+                                                                    }
+                                                                }
+                                                            }))}
+                                                            placeholder="キーポイント（1行ずつ）"
+                                                            className="text-sm min-h-[80px]"
+                                                        />
+                                                    </div>
+                                                )}
+                                                {workflow.improvementData.contentStructure.ending && (
+                                                    <div className="border rounded p-3 bg-primary/5 space-y-2">
+                                                        <h5 className="font-semibold text-sm">CTA（エンディング）</h5>
+                                                        <div className="grid gap-2 md:grid-cols-2">
+                                                            <Input
+                                                                value={workflow.improvementData.contentStructure.ending.registrationTarget || ''}
+                                                                onChange={(e) => setWorkflow(prev => ({
+                                                                    ...prev,
+                                                                    improvementData: {
+                                                                        ...prev.improvementData!,
+                                                                        contentStructure: {
+                                                                            ...prev.improvementData!.contentStructure,
+                                                                            ending: { ...prev.improvementData!.contentStructure.ending, registrationTarget: e.target.value }
+                                                                        }
+                                                                    }
+                                                                }))}
+                                                                placeholder="登録先（LINE/チャンネル登録）"
+                                                                className="text-sm"
+                                                            />
+                                                            <Input
+                                                                value={workflow.improvementData.contentStructure.ending.registrationBenefit || ''}
+                                                                onChange={(e) => setWorkflow(prev => ({
+                                                                    ...prev,
+                                                                    improvementData: {
+                                                                        ...prev.improvementData!,
+                                                                        contentStructure: {
+                                                                            ...prev.improvementData!.contentStructure,
+                                                                            ending: { ...prev.improvementData!.contentStructure.ending, registrationBenefit: e.target.value }
+                                                                        }
+                                                                    }
+                                                                }))}
+                                                                placeholder="メリット"
+                                                                className="text-sm"
+                                                            />
+                                                        </div>
+                                                        <Textarea
+                                                            value={workflow.improvementData.contentStructure.ending.callToAction || ''}
+                                                            onChange={(e) => setWorkflow(prev => ({
+                                                                ...prev,
+                                                                improvementData: {
+                                                                    ...prev.improvementData!,
+                                                                    contentStructure: {
+                                                                        ...prev.improvementData!.contentStructure,
+                                                                        ending: { ...prev.improvementData!.contentStructure.ending, callToAction: e.target.value }
+                                                                    }
+                                                                }
+                                                            }))}
+                                                            placeholder="CTA文言"
+                                                            className="text-sm min-h-[60px]"
+                                                        />
+                                                    </div>
+                                                )}
+                                            </CardContent>
+                                        </Card>
+                                    )}
+
+                                    {/* ギャップ分析 */}
+                                    {workflow.improvementData.gapAnalysis && (
+                                        <Card>
+                                            <CardHeader className="py-3 bg-yellow-50 dark:bg-yellow-900/20 border-b">
+                                                <CardTitle className="text-base font-bold">ギャップ分析</CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="p-4">
+                                                <p className="text-sm"><strong>参考動画の課題:</strong> {workflow.improvementData.gapAnalysis.originalVideoIssue || '分析中'}</p>
+                                                <p className="text-sm mt-2"><strong>提案する解決策:</strong> {workflow.improvementData.gapAnalysis.proposedSolution || '分析中'}</p>
+                                            </CardContent>
+                                        </Card>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* 古い形式: Improvements Table Display */}
+                            {workflow.improvements.length > 0 && !workflow.improvementData && (
                                 <div className="space-y-8">
-                                    {["OP", "PASTOR", "プレ本編", "本編", "ED"].map(section => {
+                                    {["OP", "PASTOR", "プレ本編", "本編", "ED", "全般"].map(section => {
                                         const sectionItems = workflow.improvements.filter(i => i.section === section);
                                         if (sectionItems.length === 0) return null;
 

@@ -7,7 +7,7 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
 export async function POST(req: NextRequest) {
    try {
       const body: ReaderAnalysisRequest = await req.json();
-      const { primaryKeyword, articleSummary, searchIntentAnalysis } = body;
+      const { primaryKeyword, articleSummary, searchIntentAnalysis, modificationInstructions } = body;
 
       const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
@@ -56,6 +56,12 @@ ${articleSummary}
    - 職業
    - 状況
 
+${modificationInstructions ? `
+【修正指示（ユーザーからの追加要望）】
+ユーザーから以下の修正指示がありました。これを最優先して分析を調整してください：
+"${modificationInstructions}"
+` : ""}
+
 以下のJSON形式で出力してください（コードブロックなしで純粋なJSONのみ）:
 {
   "level": "absolute_beginner|beginner|intermediate|advanced",
@@ -83,9 +89,22 @@ ${articleSummary}
       const result = await model.generateContent(prompt);
       const text = result.response.text();
 
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      // Remove markdown code blocks if present
+      let cleanedText = text.trim();
+      if (cleanedText.startsWith("```json")) {
+         cleanedText = cleanedText.slice(7);
+      } else if (cleanedText.startsWith("```")) {
+         cleanedText = cleanedText.slice(3);
+      }
+      if (cleanedText.endsWith("```")) {
+         cleanedText = cleanedText.slice(0, -3);
+      }
+      cleanedText = cleanedText.trim();
+
+      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-         throw new Error("Failed to parse AI response");
+         console.error("Failed to parse reader AI response:", text.substring(0, 500));
+         throw new Error("読者分析の解析に失敗しました。もう一度お試しください。");
       }
 
       const analysis: ReaderAnalysis = JSON.parse(jsonMatch[0]);

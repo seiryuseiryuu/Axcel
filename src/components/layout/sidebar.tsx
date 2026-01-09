@@ -61,7 +61,7 @@ export function Sidebar({ role }: SidebarProps) {
 
     const adminRoutes = [
         {
-            label: "AIスタジオ",
+            label: "Accel",
             icon: Sparkles,
             href: "/admin/studio",
             color: "text-primary",

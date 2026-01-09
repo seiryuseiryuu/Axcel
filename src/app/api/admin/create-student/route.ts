@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient, createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/rbac";
 import { z } from "zod";
 
@@ -8,27 +8,12 @@ const createStudentSchema = z.object({
     password: z.string().min(8),
     displayName: z.string().min(2),
     courseIds: z.array(z.string().uuid()).optional(),
-    studioMonths: z.string().optional(),  // "0", "1", "3", "6", "12", "unlimited"
+    studioMonths: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
     try {
-        // 1. Verify permisson (must be instructor or admin)
-        // Instructors can create students but only for their own courses? 
-        // Spec says "instructor: create student account". 
-        // We'll allow instructor to create, but we should audit it.
         const user = await requirePermission("canManageAllStudents");
-        // Wait, role permissions: admin has canManageAllStudents. Instructor has false.
-        // Spec: "instructor: student account creation".
-        // So instructor should have permission to create students?
-        // My roles.ts said `canManageAllStudents: false` for instructor.
-        // I should update roles.ts or use a specific permission `canCreateStudent`.
-        // Let's check roles.ts content previously written.
-
-        // For now, let's assume we need to adjust roles or this code.
-        // If I use `requireAuth` and check role manually:
-        // if (user.role !== 'admin' && user.role !== 'instructor') return 403.
-        // Let's implement logic here.
 
         const body = await request.json();
         const result = createStudentSchema.safeParse(body);
@@ -53,7 +38,12 @@ export async function POST(request: NextRequest) {
         });
 
         if (authError) {
-            return NextResponse.json({ success: false, error: authError.message }, { status: 400 });
+            console.error("Auth error details:", authError);
+            let errorMessage = authError.message;
+            if (errorMessage.toLowerCase().includes("invalid api key")) {
+                errorMessage += " (Hint: Please check if SUPABASE_SERVICE_ROLE_KEY is correctly set in Vercel environment variables. It might be invalid or contain spaces.)";
+            }
+            return NextResponse.json({ success: false, error: errorMessage }, { status: 400 });
         }
 
         const userId = authData.user.id;
@@ -70,13 +60,9 @@ export async function POST(request: NextRequest) {
                 expDate.setMonth(expDate.getMonth() + months);
                 studioExpiresAt = expDate.toISOString();
             }
-            // unlimited = null expiration (no limit)
         }
 
-        // 3. Create profile (Trigger might handle this, or manual?)
-        // If we have a trigger on auth.users insert -> profiles, we rely on it.
-        // But usually we want to set role explicitly.
-        // Let's upsert profile to be safe and set role 'student'.
+        // 3. Create profile
         const { error: profileError } = await supabaseAdmin
             .from('profiles')
             .upsert({
@@ -90,18 +76,12 @@ export async function POST(request: NextRequest) {
             });
 
         if (profileError) {
-            // Rollback auth user? 
             await supabaseAdmin.auth.admin.deleteUser(userId);
             return NextResponse.json({ success: false, error: "Failed to create profile: " + profileError.message }, { status: 500 });
         }
 
-        // 4. Enroll in courses if provided
+        // 4. Enroll in courses
         if (courseIds && courseIds.length > 0) {
-            // If instructor, check if they own these courses
-            if (user.role === 'instructor') {
-                // Verify ownership logic here if needed
-            }
-
             const enrollments = courseIds.map(courseId => ({
                 course_id: courseId,
                 student_id: userId,
@@ -114,32 +94,36 @@ export async function POST(request: NextRequest) {
 
             if (enrollError) {
                 console.error("Enrollment error", enrollError);
-                // Non-fatal?
             }
         }
 
         // 5. Audit Log
-        await supabaseAdmin.from('audit_logs').insert({
-            actor_id: user.id,
-            action: 'create_student',
-            target_type: 'user',
-            target_id: userId,
-            details: {
-                email,
-                displayName,
-                courseIds,
-                studioEnabled,
-                studioExpiresAt,
-            },
-            created_at: new Date().toISOString(),
-        });
+        try {
+            await supabaseAdmin.from('audit_logs').insert({
+                actor_id: user.id,
+                action: 'create_student',
+                target_type: 'user',
+                target_id: userId,
+                details: {
+                    email,
+                    displayName,
+                    courseIds,
+                    studioEnabled,
+                    studioExpiresAt,
+                },
+                created_at: new Date().toISOString(),
+            });
+        } catch (auditError) {
+            console.error("Audit log insert failed:", auditError);
+        }
 
         return NextResponse.json({ success: true, data: { userId } });
 
     } catch (error: any) {
-        if (error.message && error.message.includes('Unauthorized')) { // redirect throws error
+        console.error("Create user critical error:", error);
+        if (error.message && error.message.includes('Unauthorized')) {
             return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
         }
-        return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 });
+        return NextResponse.json({ success: false, error: error.message || "Internal Server Error" }, { status: 500 });
     }
 }
