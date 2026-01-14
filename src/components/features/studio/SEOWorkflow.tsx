@@ -48,6 +48,7 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isEditingReaderAnalysis, setIsEditingReaderAnalysis] = useState(false);
+    const [isEditingImprovements, setIsEditingImprovements] = useState(false);
     const [showRegenerateStep2, setShowRegenerateStep2] = useState(false);
     const [showRegenerateStep3, setShowRegenerateStep3] = useState(false);
     const [showRegenerateStep4, setShowRegenerateStep4] = useState(false);
@@ -179,6 +180,7 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
 
         try {
             const analyses: ArticleStructureAnalysis[] = [];
+            const errors: string[] = [];
 
             // If we have saved reference articles with content, use those
             const articlesToAnalyze = state.referenceArticles.length > 0
@@ -191,18 +193,37 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                 }));
 
             for (const article of articlesToAnalyze) {
-                const response = await fetch("/api/seo/structure", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        articleTitle: article.title || `${state.primaryKeyword}に関する記事`,
-                        articleContent: article.content || `この記事は${state.primaryKeyword}について解説しています。`,
-                    }),
-                });
-                const data = await response.json();
-                if (data.success) {
-                    analyses.push(data.data as ArticleStructureAnalysis);
+                try {
+                    const response = await fetch("/api/seo/structure", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            articleTitle: article.title || `${state.primaryKeyword}に関する記事`,
+                            articleContent: article.content || `この記事は${state.primaryKeyword}について解説しています。`,
+                        }),
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        analyses.push(data.data as ArticleStructureAnalysis);
+                    } else {
+                        errors.push(`${article.title || '記事'}: ${data.error}`);
+                    }
+                } catch (e: any) {
+                    errors.push(`${article.title || '記事'}: ${e.message}`);
                 }
+            }
+
+            if (analyses.length === 0) {
+                // If all failed
+                setErrorMessage(`全ての記事の構成分解に失敗しました。\n${errors.join('\n')}`);
+                return;
+            }
+
+            if (errors.length > 0) {
+                // Partial failure - warn but proceed
+                console.warn("Some analyses failed:", errors);
+                // Optionally showing a toast or non-blocking error here would be good, 
+                // but for now we proceed with what we have.
             }
 
             updateState({
@@ -1260,10 +1281,21 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
 
                         <Card>
                             <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <Lightbulb className="h-5 w-5" />
-                                    Step 4: 参考記事の改善点（軸ベース分析）
-                                </CardTitle>
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Lightbulb className="h-5 w-5" />
+                                        Step 4: 参考記事の改善点（軸ベース分析）
+                                    </CardTitle>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setIsEditingImprovements(!isEditingImprovements)}
+                                        className={isEditingImprovements ? "bg-primary/10 text-primary" : "text-muted-foreground"}
+                                    >
+                                        <Edit3 className="w-4 h-4 mr-2" />
+                                        {isEditingImprovements ? "編集を終了" : "提案を編集"}
+                                    </Button>
+                                </div>
                                 <CardDescription>
                                     競合記事から抽出した内容軸ごとに、追加・削除を選択してください。
                                 </CardDescription>
@@ -1276,8 +1308,8 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                             <tr>
                                                 <th className="border p-2 text-left font-medium">内容軸</th>
                                                 <th className="border p-2 text-left font-medium">競合記事の内容（SEO順）</th>
-                                                <th className="border p-2 text-left font-medium w-32">追加</th>
-                                                <th className="border p-2 text-left font-medium w-32">削除</th>
+                                                <th className="border p-2 text-left font-medium w-64">追加（選択 / 編集）</th>
+                                                <th className="border p-2 text-left font-medium w-64">削除（選択 / 編集）</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -1299,10 +1331,27 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                                                     id={`add-${i}`}
                                                                     checked={selection?.additionSelected ?? true}
                                                                     onCheckedChange={() => toggleAxisAddition(i)}
+                                                                    className="mt-1"
                                                                 />
-                                                                <label htmlFor={`add-${i}`} className="text-sm cursor-pointer text-green-700">
-                                                                    {axis.suggestedAddition}
-                                                                </label>
+                                                                <div className="flex-1">
+                                                                    {isEditingImprovements ? (
+                                                                        <Textarea
+                                                                            value={axis.suggestedAddition}
+                                                                            onChange={(e) => {
+                                                                                const newAxes = [...state.improvements!.axes!];
+                                                                                newAxes[i] = { ...newAxes[i], suggestedAddition: e.target.value };
+                                                                                updateState({
+                                                                                    improvements: { ...state.improvements!, axes: newAxes }
+                                                                                });
+                                                                            }}
+                                                                            className="min-h-[80px] text-xs"
+                                                                        />
+                                                                    ) : (
+                                                                        <label htmlFor={`add-${i}`} className="text-sm cursor-pointer text-green-700 block">
+                                                                            {axis.suggestedAddition}
+                                                                        </label>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </td>
                                                         <td className="border p-2 align-top">
@@ -1311,10 +1360,27 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                                                     id={`rem-${i}`}
                                                                     checked={selection?.removalSelected ?? true}
                                                                     onCheckedChange={() => toggleAxisRemoval(i)}
+                                                                    className="mt-1"
                                                                 />
-                                                                <label htmlFor={`rem-${i}`} className="text-sm cursor-pointer text-orange-700">
-                                                                    {axis.suggestedRemoval}
-                                                                </label>
+                                                                <div className="flex-1">
+                                                                    {isEditingImprovements ? (
+                                                                        <Textarea
+                                                                            value={axis.suggestedRemoval}
+                                                                            onChange={(e) => {
+                                                                                const newAxes = [...state.improvements!.axes!];
+                                                                                newAxes[i] = { ...newAxes[i], suggestedRemoval: e.target.value };
+                                                                                updateState({
+                                                                                    improvements: { ...state.improvements!, axes: newAxes }
+                                                                                });
+                                                                            }}
+                                                                            className="min-h-[80px] text-xs"
+                                                                        />
+                                                                    ) : (
+                                                                        <label htmlFor={`rem-${i}`} className="text-sm cursor-pointer text-orange-700 block">
+                                                                            {axis.suggestedRemoval}
+                                                                        </label>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </td>
                                                     </tr>

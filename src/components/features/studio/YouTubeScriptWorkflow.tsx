@@ -427,7 +427,8 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
                 selectedImprovements,
                 workflow.channelStyle, // Pass channel style for persona
                 workflow.referenceUrl,  // 元動画のURL
-                workflow.originalTranscript  // 元動画の字幕（口調を踏襲するため）
+                workflow.originalTranscript,  // 元動画の字幕（口調を踏襲するため）
+                workflow.improvementData // New: Pass structured improvement data
             );
 
             if (result.success && result.data) {

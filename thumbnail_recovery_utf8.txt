@@ -1,0 +1,508 @@
+﻿"use server";
+
+import { gemini, generateText, generateImage } from "@/lib/gemini";
+import { requireRole } from "@/lib/rbac";
+
+// Types
+export interface PatternCategory {
+    name: string;
+    description: string;
+    matchCount?: number;
+    characteristics: {
+        textPosition: string;
+        textStyle?: string;
+        colorScheme: string;
+        colorMood?: string;
+        personPosition: string;
+        personExpression?: string;
+        layout: string;
+        visualTechniques?: string;
+        effects?: string;
+    };
+    designRules?: string[];
+    requiredMaterials?: {
+        background: string;
+        person: string;
+        props: string[];
+    };
+    exampleImageIndices?: number[];
+}
+
+export interface PatternAnalysisResult {
+    patterns: PatternCategory[];
+    summary: string;
+    uniqueFindings?: string[];
+    individualAnalysis?: any[];
+}
+
+export interface ModelImageInfo {
+    imageUrl: string;
+    patternName: string;
+    description: string;
+    suggestedTexts: { text: string; reason: string }[];
+}
+
+export interface ThumbnailState {
+    step: number;
+    videoTitle: string;
+    videoDescription: string;
+    selectedThumbnails: { id: string; url: string; title: string }[];
+    patternAnalysis: PatternAnalysisResult | null;
+    modelImages: ModelImageInfo[];
+    selectedModelIndex: number | null;
+    text: string;
+    generatedImages: string[];
+}
+
+// ========================================
+// 1. Analyze Patterns (2-Stage Analysis)
+// ========================================
+export async function analyzePatterns(
+    thumbnailUrls: string[],
+    thumbnailTitles: string[]
+): Promise<{ data?: PatternAnalysisResult; logs?: string[]; error?: string }> {
+    await requireRole("student");
+    const logs: string[] = [];
+    logs.push(`[System] Starting analysis for ${thumbnailUrls.length} thumbnails.`);
+
+    if (thumbnailUrls.length < 3) {
+        return { error: "譛菴・譫壹・繧ｵ繝繝阪う繝ｫ縺悟ｿ・ｦ√〒縺吶・, logs };
+    }
+
+    try {
+        // Fetch images for multimodal analysis
+        logs.push(`[System] Fetching images for multimodal analysis...`);
+        const imagePromises = thumbnailUrls.slice(0, 5).map(async (url) => {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+                const res = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
+                if (!res.ok) {
+                    logs.push(`[System] Failed to fetch ${url.slice(0, 30)}...: ${res.status}`);
+                    return null;
+                }
+                const buffer = await res.arrayBuffer();
+                const base64 = Buffer.from(buffer).toString('base64');
+                const mimeType = res.headers.get('content-type') || 'image/jpeg';
+                return { mimeType, data: base64 };
+            } catch (e) {
+                console.error("Image fetch failed:", url);
+                logs.push(`[System] Image fetch error for ${url.slice(0, 30)}...`);
+                return null;
+            }
+        });
+
+        const images = (await Promise.all(imagePromises)).filter(Boolean) as { mimeType: string; data: string }[];
+
+        // Stage 1: Individual Analysis (Visual + Text)
+        // If images available, use Multimodal (Nanobanana Pro aka Gemini 1.5 Pro)
+        const useMultimodal = images.length > 0;
+
+        const stage1Prompt = useMultimodal
+            ? `縲千ｬｬ1谿ｵ髫趣ｼ壼句挨逕ｻ蜒上・隕冶ｦ夂噪蛻・梵 (Gemini 1.5 Pro Vision)縲・
+${images.length}譫壹・YouTube繧ｵ繝繝阪う繝ｫ逕ｻ蜒上ｒ隕冶ｦ夂噪縺ｫ隧ｳ邏ｰ蛻・梵縺励∽ｻ･荳九・JSON蠖｢蠑上〒蜃ｺ蜉帙＠縺ｦ縺上□縺輔＞縲・
+縲仙・譫舌・驥咲せ: 繝・Ο繝・・縲∽ｺｺ迚ｩ縲√◎縺励※縲後ユ繝ｳ繧ｷ繝ｧ繝ｳ諢溘阪・1. 繝・Ο繝・・縺ｨ莠ｺ迚ｩ縺ｮ菴咲ｽｮ髢｢菫ゅｒ豁｣遒ｺ縺ｫ險倩ｿｰ縺励※縺上□縺輔＞・井ｾ・ 繝・Ο繝・・縺悟承荳翫∽ｺｺ迚ｩ縺悟ｷｦ荳九°繧芽ｦ倶ｸ翫￡縺ｦ縺・ｋ・峨・2. 縺昴・繝・Ο繝・・縺ｮ蜀・ｮｹ縺後←縺・＞縺・э蝗ｳ縺具ｼ郁ｳｪ蝠上∫・繧翫∽ｺ句ｮ滓署遉ｺ縺ｪ縺ｩ・峨ｒ蛻・梵縺励※縺上□縺輔＞縲・3. 逕ｻ蜒丞・菴薙°繧我ｼ昴ｏ繧九後ユ繝ｳ繧ｷ繝ｧ繝ｳ諢溘搾ｼ井ｾ・ 繝上う繝・Φ繧ｷ繝ｧ繝ｳ縲√す繝ｪ繧｢繧ｹ縲√⊇縺ｮ縺ｼ縺ｮ・峨ｒ險隱槫喧縺励※縺上□縺輔＞縲・
+莉･荳九・JSON蠖｢蠑上〒蝗樒ｭ・
+{
+  "individualAnalysis": [
+    {
+      "imageIndex": 1,
+      "title": "蜍慕判繧ｿ繧､繝医Ν",
+      "text": {
+        "content": "繝・Ο繝・・蜀・ｮｹ",
+        "position": "驟咲ｽｮ・井ｾ・ 逕ｻ髱｢荳企Κ80%繧貞頃譛会ｼ・,
+        "style": "繝・じ繧､繝ｳ・井ｾ・ 驥題牡縺ｮ讌ｵ螟ｪ繧ｴ繧ｷ繝・け縺ｫ襍､縺ｮ蠅・阜邱夲ｼ・,
+        "meaning": "蜀・ｮｹ縺ｮ諢丞峙・井ｾ・ 隕冶・閠・・荳榊ｮ峨ｒ辣ｽ繧句撫縺・°縺托ｼ・
+      },
+      "person": {
+        "hasPerson": true,
+        "position": "驟咲ｽｮ・井ｾ・ 蟾ｦ荳具ｼ・,
+        "expression": "陦ｨ諠・ｼ井ｾ・ 蜿｣繧貞､ｧ縺阪￥髢九￠縺滄ｩ壹″縺ｮ陦ｨ諠・ｼ・,
+        "relationToText": "繝・Ο繝・・縺ｨ縺ｮ髢｢菫ゑｼ井ｾ・ 繝・Ο繝・・繧呈欠蟾ｮ縺励※豕ｨ逶ｮ縺輔○縺ｦ縺・ｋ・・
+      },
+      "vibe": {
+        "mood": "繝・Φ繧ｷ繝ｧ繝ｳ諢滂ｼ井ｾ・ 邱願ｿｫ諢溘・縺ゅｋ繝上う繝・Φ繧ｷ繝ｧ繝ｳ・・,
+        "colorScheme": "驟崎牡・井ｾ・ 鮟定レ譎ｯ縺ｫ襍､縺ｨ鮟・牡・・
+      }
+    }
+  ]
+}`
+            : `縲千ｬｬ1谿ｵ髫趣ｼ壼句挨逕ｻ蜒上・邊ｾ邱ｻ蛻・梵 (繝・く繧ｹ繝医・繝ｼ繧ｹ)縲・
+${thumbnailUrls.length}譫壹・YouTube繧ｵ繝繝阪う繝ｫ繧貞・譫舌＠縺ｦ縺上□縺輔＞縲・
+縲仙虚逕ｻ繧ｿ繧､繝医Ν蜿り・・${thumbnailTitles.map((t, i) => `逕ｻ蜒・{i + 1}: ${t}`).join('\n')}
+
+縲仙・譫宣・岼 - 蜷・判蜒上↓縺､縺・※莉･荳九ｒ謚ｽ蜃ｺ縲・
+1. 繝・Ο繝・・/繝・く繧ｹ繝亥・譫・   - 譁・ｭ玲焚繝ｻ繝輔か繝ｳ繝医せ繧ｿ繧､繝ｫ・亥､ｪ蟄・邏ｰ蟄暦ｼ・   - 驟咲ｽｮ菴咲ｽｮ・井ｸ企Κ/荳ｭ螟ｮ/荳矩Κ・・   - 譁・ｭ苓牡繝ｻ邵∝叙繧翫・譛臥┌
+
+2. 驟崎牡繝ｻ諢滓ュ蛻・梵
+   - 荳ｻ隕∬牡・域怙螟ｧ3濶ｲ・・   - 驟崎牡縺ｮ諢丞峙・井ｾ具ｼ夊ｵ､鮟・蜊ｱ讖滓─・・   
+3. 讒句峙繝ｻ繝ｬ繧､繧｢繧ｦ繝・   - 蛻・牡繝代ち繝ｼ繝ｳ・亥腰荳/2蛻・牡/3蛻・牡・・   - 隕也ｷ夊ｪ伜ｰ弱・莉墓寺縺・
+4. 莠ｺ迚ｩ繝ｻ繧ｪ繝悶ず繧ｧ繧ｯ繝・   - 莠ｺ迚ｩ縺ｮ譛臥┌縺ｨ陦ｨ諠・   - 繝昴・繧ｺ繝ｻ驟咲ｽｮ菴咲ｽｮ
+
+莉･荳九・JSON蠖｢蠑上〒蝗樒ｭ・
+{
+  "individualAnalysis": [
+    {
+      "imageIndex": 1,
+      "title": "蜍慕判繧ｿ繧､繝医Ν",
+      "text": {
+        "hasText": true,
+        "content": "繝・Ο繝・・蜀・ｮｹ",
+        "position": "荳ｭ螟ｮ荳企Κ",
+        "color": "#FFFFFF"
+      },
+      "color": {
+        "primary": "#FF0000",
+        "secondary": "#000000",
+        "mood": "蜊ｱ讖滓─"
+      },
+      "composition": {
+        "pattern": "荳ｭ螟ｮ髮・ｸｭ蝙・
+      },
+      "person": {
+        "hasPerson": true,
+        "expression": "鬩壹″"
+      }
+    }
+  ]
+}`;
+
+        logs.push(`[Stage 1] Prompt Generated:\n${stage1Prompt.slice(0, 200)}...`);
+
+        let stage1Response;
+        if (useMultimodal) {
+            // Import generateMultimodal dynamically or assume it's available via updated import
+            const { generateMultimodal } = await import("@/lib/gemini");
+            stage1Response = await generateMultimodal(stage1Prompt, images);
+            logs.push(`[Stage 1] Multimodal Analysis Completed.`);
+        } else {
+            stage1Response = await generateText(stage1Prompt, 0.5);
+            logs.push(`[Stage 1] Text Analysis Completed.`);
+        }
+
+        let individualAnalysis: any[] = [];
+
+        try {
+            const cleanJson = stage1Response.replace(/```json/g, "").replace(/```/g, "").trim();
+            const match = cleanJson.match(/\{[\s\S]*\}/);
+            if (match) {
+                const parsed = JSON.parse(match[0]);
+                individualAnalysis = parsed.individualAnalysis || [];
+                logs.push(`[Stage 1] Extracted ${individualAnalysis.length} analysis items.`);
+            }
+        } catch (e) {
+            console.warn("Stage 1 parsing failed, proceeding with empty analysis.");
+            logs.push(`[Stage 1 Error] JSON Parsing failed: ${e}`);
+        }
+
+        // Stage 2: Pattern Extraction
+        const stage2Prompt = `縲千ｬｬ2谿ｵ髫趣ｼ壹ヱ繧ｿ繝ｼ繝ｳ謚ｽ蜃ｺ縺ｨ邨槭ｊ霎ｼ縺ｿ縲・
+莉･荳九・${thumbnailUrls.length}譫壹・繧ｵ繝繝阪う繝ｫ逕ｻ蜒上・蛟句挨蛻・梵邨先棡縺ｧ縺吶・縺薙ｌ繧峨ｒ蛻・梵縺励・*蜉ｹ譫懃噪縺ｪ繝代ち繝ｼ繝ｳ繧偵・縲・蛟九阪↓蜴ｳ驕ｸ**縺励※蛻・｡槭＠縺ｦ縺上□縺輔＞縲・
+縲仙句挨蛻・梵繝・・繧ｿ縲・${JSON.stringify(individualAnalysis, null, 2)}
+
+縲仙ｿ・郁ｦ∽ｻｶ縲・1. **2縺､縲√∪縺溘・3縺､縺ｮ繝代ち繝ｼ繝ｳ縺ｮ縺ｿ**繧貞・蜉帙＠縺ｦ縺上□縺輔＞縲・2. 蜷・ヱ繧ｿ繝ｼ繝ｳ縺ｫ縺､縺・※縲後ユ繝ｭ繝・・縺ｮ驟咲ｽｮ縲阪後ユ繝ｳ繧ｷ繝ｧ繝ｳ諢溘阪御ｺｺ迚ｩ縺ｨ繝・Ο繝・・縺ｮ髢｢菫よｧ縲阪ｒ隧ｳ邏ｰ縺ｫ螳夂ｾｩ縺励※縺上□縺輔＞縲・3. **蠢・ｦ∫ｴ譚撰ｼ・equiredMaterials・・*: 縺昴・繝代ち繝ｼ繝ｳ繧貞・迴ｾ縺吶ｋ縺溘ａ縺ｫ蠢・ｦ√↑邏譚舌ｒ蜈ｷ菴鍋噪縺ｫ險倩ｿｰ縺励※縺上□縺輔＞縲・4. **隧ｲ蠖鍋判蜒冗分蜿ｷ・・xampleImageIndices・・*: 縺ｩ縺ｮ逕ｻ蜒上′縺薙・繝代ち繝ｼ繝ｳ縺ｫ隧ｲ蠖薙☆繧九°繧帝・蛻励〒險倩ｿｰ縺励※縺上□縺輔＞縲・
+縲仙・蜉帛ｽ｢蠑上・{
+  "patterns": [
+    {
+      "name": "繝代ち繝ｼ繝ｳ蜷搾ｼ井ｾ具ｼ壼些讖滓─險ｴ豎ょ梛・・,
+      "description": "30譁・ｭ嶺ｻ･蜀・・迚ｹ蠕ｴ隱ｬ譏・,
+      "matchCount": 3,
+      "exampleImageIndices": [1, 3, 5],
+      "characteristics": {
+        "textPosition": "蜈ｷ菴鍋噪縺ｪ菴咲ｽｮ縺ｨ繧ｵ繧､繧ｺ諢・,
+        "textStyle": "繝輔か繝ｳ繝医・濶ｲ繝ｻ陬・｣ｾ縺ｮ隧ｳ邏ｰ",
+        "colorScheme": "驟崎牡縺ｨ繝繝ｼ繝・,
+        "colorMood": "隧ｳ邏ｰ縺ｪ繝・Φ繧ｷ繝ｧ繝ｳ諢滂ｼ井ｾ具ｼ夂ｷ願ｿｫ縺励◆繝上う繝・Φ繧ｷ繝ｧ繝ｳ・・,
+        "personPosition": "莠ｺ迚ｩ驟咲ｽｮ縺ｨ繝・Ο繝・・縺ｨ縺ｮ霍晞屬諢・,
+        "personExpression": "陦ｨ諠・・隕也ｷ壹・繧ｸ繧ｧ繧ｹ繝√Ε繝ｼ",
+        "layout": "讒句峙・井ｾ具ｼ壼ｯｾ隗堤ｷ壽ｧ句峙・・,
+        "visualTechniques": "隕也ｷ夊ｪ伜ｰ弱√お繝輔ぉ繧ｯ繝医・蜈ｷ菴謎ｾ・
+      },
+      "requiredMaterials": {
+        "background": "蠢・ｦ√↑閭梧勹・井ｾ具ｼ壽囓縺・げ繝ｩ繝・・繧ｷ繝ｧ繝ｳ縲・・蟶る｢ｨ譎ｯ縺ｼ縺九＠・・,
+        "person": "蠢・ｦ√↑莠ｺ迚ｩ邏譚撰ｼ井ｾ具ｼ夐ｩ壹＞縺溯｡ｨ諠・・荳雁濠霄ｫ縲√き繝｡繝ｩ逶ｮ邱夲ｼ・,
+        "props": ["霑ｽ蜉繧ｪ繝悶ず繧ｧ繧ｯ繝・", "霑ｽ蜉繧ｪ繝悶ず繧ｧ繧ｯ繝・"]
+      },
+      "designRules": [
+        "繝ｫ繝ｼ繝ｫ1: 莠ｺ迚ｩ縺ｮ隕也ｷ壹・蠢・★繝・Ο繝・・縺ｫ蜷代￠繧・,
+        "繝ｫ繝ｼ繝ｫ2: 閭梧勹縺ｯ證励￥縺玲枚蟄励ｒ陋榊・濶ｲ縺ｧ逶ｮ遶九◆縺帙ｋ"
+      ]
+    }
+  ],
+  "summary": "蜈ｨ菴薙・蛯ｾ蜷代∪縺ｨ繧・ｼ・0譁・ｭ嶺ｻ･蜀・ｼ・
+}`;
+
+        logs.push(`[Stage 2] Starting Pattern Extraction.`);
+        const stage2Response = await generateText(stage2Prompt, 0.5);
+        logs.push(`[Stage 2] Response received.`);
+
+        try {
+            const cleanJson = stage2Response.replace(/```json/g, "").replace(/```/g, "").trim();
+            const match = cleanJson.match(/\{[\s\S]*\}/);
+            if (match) {
+                const parsed = JSON.parse(match[0]);
+                return {
+                    data: {
+                        ...parsed,
+                        individualAnalysis,
+                    },
+                    logs,
+                };
+            }
+        } catch (e) {
+            console.error("Stage 2 parsing failed:", e);
+        }
+
+        return { error: "繝代ち繝ｼ繝ｳ蛻・梵縺ｫ螟ｱ謨励＠縺ｾ縺励◆縲・, logs };
+    } catch (e: any) {
+        console.error("Analysis error:", e);
+        return { error: e.message || "蛻・梵繧ｨ繝ｩ繝ｼ", logs };
+    }
+}
+
+// ========================================
+// 2. Generate Model Images for Each Pattern
+// ========================================
+export async function generateModelImages(
+    patterns: PatternCategory[],
+    videoTitle: string,
+    videoDescription?: string,
+    thumbnailUrls?: string[]
+): Promise<{ data?: ModelImageInfo[]; logs?: string[]; error?: string }> {
+    await requireRole("student");
+    const logs: string[] = [];
+
+    if (!patterns || patterns.length === 0) {
+        return { error: "繝代ち繝ｼ繝ｳ縺後≠繧翫∪縺帙ｓ縲・, logs };
+    }
+
+    try {
+        const results: ModelImageInfo[] = [];
+
+        for (const pattern of patterns) {
+            logs.push(`[Model Gen] Starting '${pattern.name}' pattern...`);
+
+            // Fetch reference images for this pattern based on exampleImageIndices
+            const exampleIndices = pattern.exampleImageIndices || [];
+            let referenceImages: { mimeType: string; data: string }[] = [];
+
+            if (thumbnailUrls && exampleIndices.length > 0) {
+                const refUrls = exampleIndices
+                    .map(idx => thumbnailUrls[idx - 1])
+                    .filter(Boolean)
+                    .slice(0, 2);
+
+                logs.push(`[Model Gen] Fetching ${refUrls.length} reference images...`);
+
+                const fetchPromises = refUrls.map(async (url) => {
+                    try {
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 5000);
+                        const res = await fetch(url, { signal: controller.signal });
+                        clearTimeout(timeoutId);
+                        if (!res.ok) return null;
+                        const buffer = await res.arrayBuffer();
+                        const base64 = Buffer.from(buffer).toString('base64');
+                        const mimeType = res.headers.get('content-type') || 'image/jpeg';
+                        return { mimeType, data: base64 };
+                    } catch { return null; }
+                });
+                referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
+            }
+
+            // High quality prompt that emphasizes matching reference style
+            // DO NOT add any text unless specified
+            const promptForImage = `Create a YouTube thumbnail template image.
+
+[CRITICAL RULES]
+- DO NOT add ANY text, letters, words, or typography to the image
+- This is a TEMPLATE image - text will be added separately
+- Match the EXACT visual style of the reference images provided
+
+[SPECIFICATIONS]
+- Aspect ratio: 16:9 (1280x720 pixels)
+- Style: ${pattern.name}
+- Color scheme: ${pattern.characteristics.colorScheme}
+
+[PERSON/SUBJECT]
+- Position: ${pattern.characteristics.personPosition}
+- Expression: ${pattern.characteristics.personExpression || 'expressive, engaging'}
+- IMPORTANT: Reproduce the person's pose and expression style from reference images
+
+[LAYOUT & COMPOSITION]
+- Layout: ${pattern.characteristics.layout}
+${pattern.characteristics.visualTechniques ? `- Visual techniques: ${pattern.characteristics.visualTechniques}` : ''}
+${pattern.requiredMaterials ? `- Background: ${pattern.requiredMaterials.background}` : ''}
+${pattern.requiredMaterials?.props?.length ? `- Props: ${pattern.requiredMaterials.props.join(', ')}` : ''}
+
+[QUALITY]
+- 8K professional quality
+- Photorealistic
+- High contrast, vibrant colors
+- Clean composition without any text or watermarks`;
+
+            logs.push(`[Model Gen] '${pattern.name}' - ${referenceImages.length} refs loaded`);
+
+            // Generate image using Gemini with reference if available
+            let imageUrl: string;
+            if (referenceImages.length > 0) {
+                const { generateImageWithReference } = await import("@/lib/gemini");
+                imageUrl = await generateImageWithReference(promptForImage, referenceImages);
+            } else {
+                imageUrl = await generateThumbnailImage(promptForImage);
+            }
+
+            // Generate text suggestions for this pattern
+            const textSuggestionPrompt = `蜍慕判繧ｿ繧､繝医Ν縲・{videoTitle}縲阪・繧ｵ繝繝阪う繝ｫ・・{pattern.name}繝代ち繝ｼ繝ｳ・臥畑縺ｮ譁・ｨ繧・縺､謠先｡医・
+JSON蠖｢蠑上〒蝗樒ｭ・
+{
+  "suggestedTexts": [
+    {"text": "譁・ｨ萓具ｼ・縲・0譁・ｭ暦ｼ・, "reason": "驕ｸ螳夂炊逕ｱ"}
+  ]
+}`;
+
+            const textResponse = await generateText(textSuggestionPrompt, 0.7);
+            let suggestedTexts: { text: string; reason: string }[] = [];
+
+            try {
+                const match = textResponse.match(/\{[\s\S]*\}/);
+                if (match) {
+                    const parsed = JSON.parse(match[0]);
+                    suggestedTexts = parsed.suggestedTexts || [];
+                }
+            } catch (e) {
+                suggestedTexts = [
+                    { text: "陦晄茶", reason: "繧､繝ｳ繝代け繝磯㍾隕・ },
+                    { text: "蠢・ｦ・, reason: "豕ｨ逶ｮ繧帝寔繧√ｋ" },
+                ];
+            }
+
+            results.push({
+                imageUrl,
+                patternName: pattern.name,
+                description: pattern.description,
+                suggestedTexts,
+            });
+        }
+
+        logs.push(`[Complete] Generated ${results.length} model images.`);
+        return { data: results, logs };
+    } catch (e: any) {
+        console.error("Model generation error:", e);
+        return { error: e.message || "繝｢繝・Ν逕ｻ蜒冗函謌舌お繝ｩ繝ｼ", logs };
+    }
+}
+
+// ========================================
+// 3. Generate Thumbnail Image
+// ========================================
+export async function generateThumbnailImage(prompt: string): Promise<string> {
+    try {
+        // Use the new generateImage function which returns base64 data URL
+        const imageDataUrl = await generateImage(prompt);
+        return imageDataUrl;
+    } catch (e: any) {
+        console.error("Image generation error:", e);
+        // Return a gradient placeholder on error (base64 encoded simple gradient)
+        return "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4MCIgaGVpZ2h0PSI3MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojNjM2NmYxIi8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdHlsZT0ic3RvcC1jb2xvcjojYTg1NWY3Ii8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSI0OCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5BSeWbvuWDj+eUn+aIkOWkseaVlzwvdGV4dD48L3N2Zz4=";
+    }
+}
+
+// ========================================
+// 4. Generate Final Thumbnails (Multiple)
+// ========================================
+export async function generateFinalThumbnails(
+    modelImage: ModelImageInfo | null,
+    text: string,
+    videoTitle: string,
+    count: number = 3,
+    patternData?: PatternCategory,
+    referenceUrls?: string[]
+): Promise<{ data?: string[]; error?: string }> {
+    await requireRole("student");
+
+    if (!text) {
+        return { error: "繧ｵ繝繝阪う繝ｫ譁・ｨ・医ユ繝ｭ繝・・・峨ｒ蜈･蜉帙＠縺ｦ縺上□縺輔＞縲・ };
+    }
+
+    try {
+        const images: string[] = [];
+
+        // Fetch reference images if provided
+        let referenceImages: { mimeType: string; data: string }[] = [];
+        if (referenceUrls && referenceUrls.length > 0) {
+            const fetchPromises = referenceUrls.slice(0, 2).map(async (url) => {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+                    const res = await fetch(url, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    if (!res.ok) return null;
+                    const buffer = await res.arrayBuffer();
+                    const base64 = Buffer.from(buffer).toString('base64');
+                    const mimeType = res.headers.get('content-type') || 'image/jpeg';
+                    return { mimeType, data: base64 };
+                } catch { return null; }
+            });
+            referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
+        }
+
+        // Get text styling from pattern
+        const textStyle = patternData?.characteristics?.textStyle || "bold white with black outline";
+        const colorScheme = patternData?.characteristics?.colorScheme || "high contrast";
+
+        for (let i = 0; i < count; i++) {
+            // Enhanced prompt that emphasizes using the model image as base
+            const variationPrompt = `[TASK]: Create a final YouTube thumbnail by combining the model image with text overlay.
+
+[MANDATORY - EXACT TEXT]
+The ONLY text on this thumbnail must be: "${text}"
+- DO NOT add any other text, labels, watermarks, or typography
+- Text must be large, bold, and highly readable
+- Font style: ${textStyle}
+- Text position: prominent center or upper area, maximum visibility
+
+[STYLE REFERENCE]
+- Pattern name: ${modelImage?.patternName || 'professional thumbnail'}
+- Use the model image as the primary visual base
+- Maintain the same person, pose, expression, lighting, and composition from the model
+- Color scheme: ${colorScheme}
+
+[SPECIFICATIONS]
+- Resolution: 1280x720 (16:9 aspect ratio)
+- Style: ${patternData?.description || 'eye-catching YouTube thumbnail'}
+${patternData?.characteristics?.visualTechniques ? `- Visual effects: ${patternData.characteristics.visualTechniques}` : ''}
+
+[CRITICAL QUALITY REQUIREMENTS]
+- Create as if this is taken from a professional YouTube channel
+- Photorealistic quality for any people in the image
+- Sharp, high-definition image (8K equivalent quality)
+- Professional color grading and contrast
+- The text "${text}" must look like it was designed by a professional graphic designer
+
+[VARIATION ${i + 1} of ${count}]
+${i === 0 ? '- Standard composition from model image' : i === 1 ? '- Slightly more dynamic composition, vibrant colors' : '- Alternative angle or emphasis, maintain quality'}
+
+IMPORTANT: The person in the image must look exactly like the model image. The text styling must match the reference thumbnails.`;
+
+            let imageUrl: string;
+            if (referenceImages.length > 0) {
+                // Use multimodal generation with reference images
+                const { generateImageWithReference } = await import("@/lib/gemini");
+                imageUrl = await generateImageWithReference(variationPrompt, referenceImages);
+            } else {
+                imageUrl = await generateThumbnailImage(variationPrompt);
+            }
+            images.push(imageUrl);
+        }
+
+        return { data: images };
+    } catch (e: any) {
+        console.error("Final generation error:", e);
+        return { error: e.message || "譛邨ら函謌舌お繝ｩ繝ｼ" };
+    }
+}
+

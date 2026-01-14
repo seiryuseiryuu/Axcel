@@ -1,17 +1,19 @@
 ﻿"use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ChannelSelector } from "@/components/features/studio/ChannelSelector";
 import { ChannelInput, ChannelThumbnail } from "@/types/thumbnail";
-import { analyzePatterns, generateModelImages, generateFinalThumbnails, PatternCategory, ModelImageInfo, PatternAnalysisResult } from "@/app/actions/thumbnail";
+import { analyzePatterns, generateModelImages, generateFinalThumbnails, generateThumbnailPrompt, PatternCategory, ModelImageInfo, PatternAnalysisResult } from "@/app/actions/thumbnail";
 import {
     ArrowRight, ArrowLeft, Check, Loader2, Sparkles, RefreshCw,
-    Download, Type, Camera, Eye, Wand2, Youtube, Code, ChevronDown, ChevronUp, Package
+    Download, Type, Camera, Eye, Wand2, Youtube, Code, ChevronDown, ChevronUp, Package,
+    Upload, Image as ImageIcon, X
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -31,6 +33,8 @@ interface WorkflowState {
     text: string;
     generatedImages: string[];
     logs: string[];
+    generatedPrompt: string; // New state for prompt
+    isPromptEditing: boolean; // New state for visibility
 }
 
 const STEPS = [
@@ -46,6 +50,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
     const { toast } = useToast();
     const [isPending, startTransition] = useTransition();
     const [isLogsOpen, setIsLogsOpen] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Workflow State
     const [workflow, setWorkflow] = useState<WorkflowState>({
@@ -59,6 +64,8 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
         text: "",
         generatedImages: [],
         logs: [],
+        generatedPrompt: "",
+        isPromptEditing: false,
     });
 
     // Channel State
@@ -68,6 +75,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
     const [competitors, setCompetitors] = useState<ChannelInput[]>([
         { id: 'comp-1', url: '', name: '', type: 'competitor', thumbnails: [], isLoading: false }
     ]);
+    const [uploadedImages, setUploadedImages] = useState<ChannelThumbnail[]>([]);
 
     // Actions
     const goToStep = (step: number) => setWorkflow(prev => ({ ...prev, step }));
@@ -79,6 +87,28 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
             if (prev.selectedThumbnails.length >= 10) return prev;
             return { ...prev, selectedThumbnails: [...prev.selectedThumbnails, thumb] };
         });
+    };
+
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (event.target?.result) {
+                const newImage: ChannelThumbnail = {
+                    id: `upload-${Date.now()}`,
+                    thumbnail_url: event.target.result as string,
+                    video_title: file.name,
+                    published_at: new Date().toISOString(),
+                    view_count: 0
+                };
+                setUploadedImages(prev => [...prev, newImage]);
+                // Automatically select uploaded image
+                handleThumbnailSelect(newImage);
+            }
+        };
+        reader.readAsDataURL(file);
     };
 
     const runAnalysis = () => {
@@ -115,7 +145,6 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
 
                 if (modelRes.error) {
                     toast({ title: "画像生成警告", description: "一部のモデル画像生成に失敗しました: " + modelRes.error, variant: "destructive" });
-                    // Still stay on step 4 to show patterns, but maybe no images?
                 } else if (modelRes.data) {
                     setWorkflow(prev => ({ ...prev, modelImages: modelRes.data! }));
                 }
@@ -129,7 +158,8 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
         setWorkflow(prev => ({ ...prev, selectedModelIndex: index }));
     };
 
-    const generateFinal = () => {
+    // Phase 1: Generate Prompt Only
+    const generatePrompt = () => {
         if (!workflow.text.trim()) {
             toast({ title: "エラー", description: "サムネイルに表示する文言（テロップ）を入力してください", variant: "destructive" });
             return;
@@ -140,7 +170,40 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 ? workflow.modelImages[workflow.selectedModelIndex]
                 : null;
 
-            // Get pattern data for text styling
+            const patternData = workflow.selectedModelIndex !== null && workflow.patternAnalysis
+                ? workflow.patternAnalysis.patterns[workflow.selectedModelIndex]
+                : undefined;
+
+            const res = await generateThumbnailPrompt(
+                workflow.text,
+                patternData?.characteristics?.textStyle,
+                patternData?.characteristics?.colorScheme,
+                patternData?.characteristics?.subjectType
+            );
+
+            if (res.error) {
+                onError(res.error);
+                toast({ title: "エラー", description: res.error, variant: "destructive" });
+            } else if (res.data) {
+                setWorkflow(prev => ({
+                    ...prev,
+                    generatedPrompt: res.data!,
+                    isPromptEditing: true
+                }));
+                onPromptGenerated(res.data!); // Notify parent if needed
+                toast({ title: "プロンプト生成完了", description: "内容を確認・編集してください" });
+            }
+        });
+    };
+
+    // Phase 2: Generate Final Image using the (possibly edited) prompt
+    const generateFinalImage = () => {
+        startTransition(async () => {
+            const selectedModel = workflow.selectedModelIndex !== null
+                ? workflow.modelImages[workflow.selectedModelIndex]
+                : null;
+
+            // Get pattern data for details
             const patternData = workflow.selectedModelIndex !== null && workflow.patternAnalysis
                 ? workflow.patternAnalysis.patterns[workflow.selectedModelIndex]
                 : undefined;
@@ -156,17 +219,18 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 selectedModel,
                 workflow.text,
                 workflow.videoTitle,
-                3,
+                1, // Only 1 image requested
                 patternData,
-                referenceUrls
+                referenceUrls,
+                workflow.generatedPrompt // Use custom prompt
             );
 
             if (res.error) {
                 onError(res.error);
                 toast({ title: "生成エラー", description: res.error, variant: "destructive" });
             } else if (res.data) {
-                setWorkflow(prev => ({ ...prev, generatedImages: res.data!, step: 6 }));
-                toast({ title: "生成完了", description: `${res.data.length}枚のサムネイルを生成` });
+                setWorkflow(prev => ({ ...prev, generatedImages: res.data!, step: 6, isPromptEditing: false }));
+                toast({ title: "生成完了", description: "サムネイルが完成しました" });
             }
         });
     };
@@ -183,9 +247,12 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
             text: "",
             generatedImages: [],
             logs: [],
+            generatedPrompt: "",
+            isPromptEditing: false,
         });
         setOwnChannel({ id: 'own', url: '', name: '', type: 'own', thumbnails: [], isLoading: false });
         setCompetitors([{ id: 'comp-1', url: '', name: '', type: 'competitor', thumbnails: [], isLoading: false }]);
+        setUploadedImages([]);
     };
 
     const selectedModel = workflow.selectedModelIndex !== null
@@ -223,7 +290,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 </Card>
             )}
 
-            {/* Progress Bar - Matched with ScriptWorkflow */}
+            {/* Progress Bar */}
             <div className="flex items-center justify-between bg-muted/30 rounded-lg p-4 overflow-x-auto">
                 {STEPS.map((s, i) => (
                     <div key={s.num} className="flex items-center">
@@ -329,6 +396,8 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                             selectedThumbnails={workflow.selectedThumbnails}
                         />
 
+                        {/* Image Upload Section Removed from here */}
+
                         <div className="pt-6 border-t flex items-center justify-between">
                             <p className="text-sm font-medium text-muted-foreground">
                                 選択中: <Badge variant="secondary" className="ml-2 font-bold">{workflow.selectedThumbnails.length}枚</Badge>
@@ -349,6 +418,8 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                     </CardContent>
                 </Card>
             )}
+
+            {/* Step 3: Analysis (Skipped in code view but logic handles it) */}
 
             {/* Step 4: Model Selection */}
             {workflow.step === 4 && workflow.patternAnalysis && (
@@ -405,29 +476,6 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                                             {model.description}
                                         </p>
 
-                                        {/* Logic Tags */}
-                                        {(() => {
-                                            const pattern = workflow.patternAnalysis?.patterns.find(p => p.name === model.patternName);
-                                            if (!pattern) return null;
-                                            return (
-                                                <div className="flex flex-wrap gap-1 mt-2">
-                                                    {pattern.characteristics.sentiment && (
-                                                        <Badge variant="secondary" className="text-[10px] px-1.5 h-5 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20">
-                                                            {pattern.characteristics.sentiment}
-                                                        </Badge>
-                                                    )}
-                                                    <Badge variant="outline" className="text-[10px] px-1.5 h-5 text-muted-foreground">
-                                                        {pattern.characteristics.textPosition}
-                                                    </Badge>
-                                                    {pattern.characteristics.subjectType !== 'none' && (
-                                                        <Badge variant="outline" className="text-[10px] px-1.5 h-5 text-muted-foreground">
-                                                            {pattern.characteristics.subjectType === 'real_person' ? '人物' : 'イラスト'}
-                                                        </Badge>
-                                                    )}
-                                                </div>
-                                            );
-                                        })()}
-
                                         {/* Suggested Texts */}
                                         <div className="flex flex-wrap gap-1.5">
                                             {model.suggestedTexts.slice(0, 3).map((s, j) => (
@@ -444,19 +492,6 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                                                 </Badge>
                                             ))}
                                         </div>
-
-                                        {/* Required Materials */}
-                                        {workflow.patternAnalysis?.patterns[i]?.requiredMaterials && (
-                                            <div className="pt-2 border-t border-border/30">
-                                                <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center">
-                                                    <Package className="w-3 h-3 mr-1" /> 必要素材
-                                                </p>
-                                                <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                                                    <span className="truncate">• 背景: {workflow.patternAnalysis.patterns[i].requiredMaterials?.background || '未指定'}</span>
-                                                    <span className="truncate">• 人物: {workflow.patternAnalysis.patterns[i].requiredMaterials?.person || '未指定'}</span>
-                                                </div>
-                                            </div>
-                                        )}
                                     </CardContent>
                                 </Card>
                             ))}
@@ -485,7 +520,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                             <Camera className="w-5 h-5" />
                             Step 5: テキスト・素材を指定
                         </CardTitle>
-                        <CardDescription>サムネイルに表示するテキストは非常に重要です。「クリックしたくなる」言葉を選びましょう</CardDescription>
+                        <CardDescription>生成のための最終調整を行います。「プロンプト生成」でAIへの指示を作成します</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
                         {/* Selected Model Preview */}
@@ -509,29 +544,67 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                                 placeholder="例：衝撃、必見、〇〇を試したら驚きの結果に... など自由に入力"
                                 className="min-h-[120px] text-lg font-medium resize-y"
                             />
-                            <p className="text-xs text-muted-foreground flex items-center justify-between">
-                                <span>💡 インパクトのある短い言葉が効果的です</span>
-                                <span>{workflow.text.length}文字</span>
-                            </p>
                         </div>
 
-                        {/* Quick Text Suggestions */}
-                        {selectedModel && selectedModel.suggestedTexts.length > 0 && (
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-muted-foreground">AIからの提案</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {selectedModel.suggestedTexts.map((s, i) => (
-                                        <Button
-                                            key={i}
-                                            variant="outline"
-                                            size="sm"
-                                            className="hover:bg-muted"
-                                            onClick={() => setWorkflow(prev => ({ ...prev, text: s.text }))}
-                                        >
-                                            <Sparkles className="w-3 h-3 mr-1.5 opacity-70" />
-                                            {s.text}
-                                        </Button>
-                                    ))}
+                        {/* Image Upload Section - Moved to Step 5 */}
+                        <div className="border-t pt-4 mt-4">
+                            <Label className="text-sm font-medium mb-2 block">自前の素材を追加（任意）</Label>
+                            <div className="flex items-center gap-4">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="gap-2"
+                                >
+                                    <Upload className="w-4 h-4" />
+                                    画像をアップロード
+                                </Button>
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    className="hidden"
+                                    accept="image/*"
+                                    onChange={handleImageUpload}
+                                />
+                                {uploadedImages.length > 0 && (
+                                    <div className="flex gap-2 overflow-x-auto pb-2">
+                                        {uploadedImages.map((img) => (
+                                            <div key={img.id} className="relative w-16 h-9 rounded overflow-hidden border">
+                                                <img src={img.thumbnail_url} className="w-full h-full object-cover" />
+                                                <Button
+                                                    size="icon"
+                                                    variant="destructive"
+                                                    className="absolute top-0 right-0 h-4 w-4 rounded-full opacity-0 group-hover:opacity-100"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setUploadedImages(prev => prev.filter(imgItem => imgItem.id !== img.id));
+                                                    }}
+                                                >
+                                                    <X className="w-3 h-3" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">※ここで追加した画像は、最終的な画像生成の参考素材として使用されます。</p>
+                        </div>
+
+                        {/* Prompt Editing Area */}
+                        {workflow.isPromptEditing && (
+                            <div className="space-y-2 animate-in fade-in zoom-in-95 duration-300">
+                                <Label className="text-base font-bold flex items-center gap-2 text-primary">
+                                    <Sparkles className="w-4 h-4" />
+                                    AIへの指示書（プロンプト）
+                                </Label>
+                                <div className="relative border-2 border-primary/20 rounded-xl overflow-hidden shadow-sm">
+                                    <Textarea
+                                        value={workflow.generatedPrompt}
+                                        onChange={(e) => setWorkflow(prev => ({ ...prev, generatedPrompt: e.target.value }))}
+                                        className="min-h-[300px] font-mono text-sm leading-relaxed p-4 border-0 focus-visible:ring-0 bg-background/50"
+                                    />
+                                    <div className="absolute bottom-4 right-4 bg-background/80 backdrop-blur rounded-lg p-2 text-xs text-muted-foreground border shadow-sm">
+                                        ※ここを書き換えると生成結果が変わります
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -540,13 +613,27 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                             <Button variant="ghost" onClick={() => goToStep(4)}>
                                 <ArrowLeft className="w-4 h-4 mr-2" /> 戻る
                             </Button>
-                            <Button
-                                onClick={generateFinal}
-                                disabled={isPending}
-                            >
-                                {isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Wand2 className="w-4 h-4 mr-2" />}
-                                サムネイル生成を実行
-                            </Button>
+
+                            {!workflow.isPromptEditing ? (
+                                <Button
+                                    onClick={generatePrompt}
+                                    disabled={isPending}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                                >
+                                    {isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Code className="w-4 h-4 mr-2" />}
+                                    プロンプトを生成・編集する
+                                </Button>
+                            ) : (
+                                <Button
+                                    onClick={generateFinalImage}
+                                    disabled={isPending}
+                                    className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg px-8"
+                                    size="lg"
+                                >
+                                    {isPending ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Wand2 className="w-5 h-5 mr-2" />}
+                                    画像を生成する（1枚）
+                                </Button>
+                            )}
                         </div>
                     </CardContent>
                 </Card>
@@ -561,57 +648,53 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                                 <Wand2 className="w-5 h-5" />
                                 生成結果
                             </CardTitle>
-                            <CardDescription>{workflow.generatedImages.length}枚のサムネイルを生成しました</CardDescription>
+                            <CardDescription>完成したサムネイルを確認してください</CardDescription>
                         </div>
                         <Button variant="outline" size="sm" onClick={reset}>
                             <RefreshCw className="w-4 h-4 mr-2" /> 新規作成
                         </Button>
                     </CardHeader>
                     <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {workflow.generatedImages.map((url, i) => (
-                                <div key={i} className="relative group rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 ring-1 ring-border/50">
+                        {/* Single Large Image Display */}
+                        {workflow.generatedImages.length > 0 && (
+                            <div className="flex flex-col items-center space-y-6">
+                                <div className="relative group rounded-xl overflow-hidden shadow-2xl ring-1 ring-border/50 max-w-4xl w-full">
                                     <div className="aspect-video bg-muted">
                                         <img
-                                            src={url}
-                                            alt={`サムネイル バリエーション ${i + 1}`}
-                                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                                            onError={(e) => {
-                                                const target = e.target as HTMLImageElement;
-                                                target.style.display = 'none';
-                                                target.parentElement!.innerHTML = '<div class="flex items-center justify-center h-full flex-col gap-2"><span class="text-xs text-muted-foreground">画像読み込みエラー</span></div>';
-                                            }}
+                                            src={workflow.generatedImages[0]}
+                                            alt="生成されたサムネイル"
+                                            className="w-full h-full object-cover"
                                         />
                                     </div>
-                                    <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex justify-end gap-2">
-                                        <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            className="h-8 text-xs backdrop-blur-md bg-white/20 hover:bg-white/40 text-white border-none"
-                                            onClick={() => {
-                                                const a = document.createElement('a');
-                                                a.href = url;
-                                                a.download = `thumbnail-${i + 1}.png`;
-                                                a.click();
-                                                toast({ title: "ダウンロード開始", description: "間もなく保存されます" });
-                                            }}
-                                        >
-                                            <Download className="w-3 h-3 mr-1" /> 保存
-                                        </Button>
-                                    </div>
+                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
                                 </div>
-                            ))}
-                        </div>
+
+                                <Button
+                                    size="lg"
+                                    className="w-full max-w-sm shadow-lg text-base"
+                                    onClick={() => {
+                                        const a = document.createElement('a');
+                                        a.href = workflow.generatedImages[0];
+                                        a.download = `thumbnail-${Date.now()}.png`;
+                                        a.click();
+                                        toast({ title: "ダウンロード開始", description: "間もなく保存されます" });
+                                    }}
+                                >
+                                    <Download className="w-5 h-5 mr-2" />
+                                    画像を保存する
+                                </Button>
+                            </div>
+                        )}
 
                         <div className="mt-8 pt-6 border-t border-border/40">
                             <div className="flex items-center justify-center p-6 bg-muted/20 rounded-xl border border-dashed border-border">
                                 <div className="text-center space-y-2">
-                                    <h3 className="font-semibold text-foreground">気に入ったものはありましたか？</h3>
+                                    <h3 className="font-semibold text-foreground">修正が必要ですか？</h3>
                                     <p className="text-sm text-muted-foreground">
-                                        微調整したい場合は、テキストを変更して再生成できます
+                                        プロンプトやテキストを調整して、もう一度生成できます
                                     </p>
                                     <Button variant="outline" onClick={() => goToStep(5)} className="mt-2">
-                                        <ArrowLeft className="w-4 h-4 mr-2" /> テキストを変更して再生成
+                                        <ArrowLeft className="w-4 h-4 mr-2" /> プロンプトを調整して再生成
                                     </Button>
                                 </div>
                             </div>

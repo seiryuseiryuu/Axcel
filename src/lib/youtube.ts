@@ -99,22 +99,32 @@ async function fetchTranscriptViaSupadata(videoId: string): Promise<TranscriptRe
     const apiKey = process.env.SUPADATA_API_KEY;
 
     if (!apiKey) {
-        console.log("[Supadata] API key not configured, skipping");
+        console.warn("[Supadata] SKIPPING: SUPADATA_API_KEY is not set in environment variables.");
         return { transcript: null, error: "SUPADATA_API_KEY not set" };
     }
 
     console.log("[Supadata] Trying Supadata API for:", videoId);
 
+    const fetchSupadata = async (lang?: string) => {
+        const url = `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}${lang ? `&lang=${lang}` : ''}`;
+        const res = await fetch(url, {
+            headers: {
+                'x-api-key': apiKey,
+                'Accept': 'application/json',
+            },
+        });
+        return res;
+    }
+
     try {
-        const response = await fetch(
-            `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&lang=ja`,
-            {
-                headers: {
-                    'x-api-key': apiKey,
-                    'Accept': 'application/json',
-                },
-            }
-        );
+        // First try with Japanese
+        let response = await fetchSupadata('ja');
+
+        // If 404 or bad request, try without lang (auto-detect)
+        if (!response.ok && response.status === 404) {
+            console.log("[Supadata] 'ja' transcript not found, retrying with auto-detect...");
+            response = await fetchSupadata();
+        }
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -133,14 +143,14 @@ async function fetchTranscriptViaSupadata(videoId: string): Promise<TranscriptRe
                 .trim();
 
             if (transcript.length > 50) {
-                console.log("[Supadata] Success, length:", transcript.length);
+                console.log("[Supadata] Success! Transcript length:", transcript.length);
                 return { transcript, method: "Supadata" };
             }
         }
 
         return { transcript: null, error: "Empty or short transcript" };
     } catch (e: any) {
-        console.error("[Supadata] Error:", e.message);
+        console.error("[Supadata] Connection Error:", e.message);
         return { transcript: null, error: e.message };
     }
 }

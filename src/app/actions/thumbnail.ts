@@ -348,11 +348,22 @@ export async function generateModelImages(
         return { error: "パターンがありません。", logs };
     }
 
+    // Ensure we have at least 3 patterns to generate 3 images
+    let workingPatterns = [...patterns];
+    if (workingPatterns.length < 3) {
+        let i = 0;
+        while (workingPatterns.length < 3) {
+            // Cycle through existing patterns to fill up to 3
+            workingPatterns.push({ ...patterns[i % patterns.length], name: `${patterns[i % patterns.length].name} (Var ${Math.floor(workingPatterns.length / patterns.length) + 1})` });
+            i++;
+        }
+    }
+    // Limit to 3 if more
+    workingPatterns = workingPatterns.slice(0, 3);
+
     try {
-
-
-        const promises = patterns.map(async (pattern) => {
-            logs.push(`[Model Gen] Starting '${pattern.name}' pattern...`);
+        const promises = workingPatterns.map(async (pattern, idx) => {
+            logs.push(`[Model Gen] Starting '${pattern.name}'...`);
 
             // Fetch reference images for this pattern based on exampleImageIndices
             const exampleIndices = pattern.exampleImageIndices || [];
@@ -364,7 +375,7 @@ export async function generateModelImages(
                     .filter(Boolean)
                     .slice(0, 2);
 
-                logs.push(`[Model Gen] Fetching ${refUrls.length} reference images...`);
+                logs.push(`[Model Gen] Fetching ${refUrls.length} reference images for '${pattern.name}'...`);
 
                 const fetchPromises = refUrls.map(async (url) => {
                     try {
@@ -445,12 +456,21 @@ ${pattern.requiredMaterials?.props?.length ? `- Props/Icons: ${pattern.requiredM
             try {
                 if (referenceImages.length > 0) {
                     const { generateImageWithReference } = await import("@/lib/gemini");
-                    imageUrl = await generateImageWithReference(promptForImage, referenceImages);
+                    try {
+                        imageUrl = await generateImageWithReference(promptForImage, referenceImages);
+                        logs.push(`[Model Gen] '${pattern.name}' - Image generated with reference.`);
+                    } catch (refError) {
+                        console.warn(`[Model Gen] Failed with reference for '${pattern.name}', falling back to text-only generation.`, refError);
+                        logs.push(`[Model Gen] '${pattern.name}' - Reference generation failed, falling back.`);
+                        imageUrl = await generateThumbnailImage(promptForImage);
+                    }
                 } else {
                     imageUrl = await generateThumbnailImage(promptForImage);
+                    logs.push(`[Model Gen] '${pattern.name}' - Image generated without reference.`);
                 }
             } catch (e) {
                 console.error(`Failed to generate image for pattern ${pattern.name}:`, e);
+                logs.push(`[Model Gen Error] Failed to generate image for '${pattern.name}': ${e}`);
                 return null;
             }
 
@@ -472,11 +492,13 @@ JSON形式で回答:
                     const parsed = JSON.parse(match[0]);
                     suggestedTexts = parsed.suggestedTexts || [];
                 }
+                logs.push(`[Model Gen] '${pattern.name}' - Text suggestions generated.`);
             } catch (e) {
                 suggestedTexts = [
                     { text: "衝撃", reason: "インパクト重視" },
                     { text: "必見", reason: "注目を集める" },
                 ];
+                logs.push(`[Model Gen Error] '${pattern.name}' - Text suggestion generation failed: ${e}`);
             }
 
             return {
@@ -493,6 +515,7 @@ JSON形式で回答:
         return { data: results, logs };
     } catch (e: any) {
         console.error("Model generation error:", e);
+        logs.push(`[Model Gen Error] Overall model generation error: ${e.message || "Unknown error"}`);
         return { error: e.message || "モデル画像生成エラー", logs };
     }
 }
@@ -627,13 +650,76 @@ export async function generateThumbnailImage(prompt: string): Promise<string> {
 // ========================================
 // 4. Generate Final Thumbnails (Multiple)
 // ========================================
+// ========================================
+// 3.5 Generate Prompt for Final Thumbnail
+// ========================================
+export async function generateThumbnailPrompt(
+    text: string,
+    textStyle: string = "bold white with black outline",
+    colorScheme: string = "high contrast",
+    subjectType: string = "real_person"
+): Promise<{ data?: string; error?: string }> {
+    try {
+        await requireRole("student");
+
+        if (!text) return { error: "サムネイル文言がありません。" };
+
+        const prompt = `[TASK]: Add text overlay to the model image template.
+
+[MANDATORY TEXT - EXACT CHARACTERS]
+Render EXACTLY this text: "${text}"
+- Write ONLY these characters: "${text}"
+- DO NOT modify, paraphrase, or add to this text
+- DO NOT write any other text, labels, or watermarks
+- Use standard Japanese characters (no garbled/broken text)
+
+[TYPOGRAPHY - MATCH REFERENCE STYLE]
+- Font style: ${textStyle}
+- If "Gothic/ゴシック": heavy sans-serif, blocky
+- If "Mincho/明朝": sharp serif with contrast
+- If "Brush/筆文字": dynamic calligraphy
+- Apply effects from reference: outlines, shadows, gradients
+- Text must look professionally designed
+
+[PRESERVE FROM MODEL IMAGE]
+- Keep the EXACT same person/character (pose, expression, clothing)
+- Keep the EXACT same background and composition
+- Keep the EXACT same color scheme: ${colorScheme}
+- Keep all icons, stamps, badges in their original positions
+${subjectType === 'real_person' ? `- PERSON must match model exactly` : subjectType === 'illustration' || subjectType === 'character' ? `- CHARACTER/ILLUSTRATION must match model exactly` : `- GRAPHICS must match model exactly`}
+
+[SPECIFICATIONS]
+- Resolution: 1280x720 (16:9)
+- 8K professional quality
+- High contrast, vibrant colors
+
+[NEGATIVE - ABSOLUTELY DO NOT]
+- DO NOT write text other than "${text}"
+- DO NOT change the person/character appearance
+- DO NOT add new people or elements
+- DO NOT create garbled/broken Japanese text
+- DO NOT blur or distort any element
+
+CRITICAL: The ONLY text must be "${text}". Everything else stays identical to model.`;
+
+        return { data: prompt };
+    } catch (e: any) {
+        console.error("Generate Prompt Error:", e);
+        return { error: e.message || "プロンプト生成中にエラーが発生しました" };
+    }
+}
+
+// ========================================
+// 4. Generate Final Thumbnails (Multiple)
+// ========================================
 export async function generateFinalThumbnails(
     modelImage: ModelImageInfo | null,
     text: string,
     videoTitle: string,
     count: number = 3,
     patternData?: PatternCategory,
-    referenceUrls?: string[]
+    referenceUrls?: string[],
+    customPrompt?: string // Add custom prompt support
 ): Promise<{ data?: string[]; error?: string }> {
     await requireRole("student");
 
@@ -661,14 +747,16 @@ export async function generateFinalThumbnails(
             referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
         }
 
-        // Get text styling from pattern
-        const textStyle = patternData?.characteristics?.textStyle || "bold white with black outline";
-        const colorScheme = patternData?.characteristics?.colorScheme || "high contrast";
-
         // Generate images in parallel
         const promises = Array.from({ length: count }).map(async (_, i) => {
-            // FINAL THUMBNAIL: Add exact text to template
-            const variationPrompt = `[TASK]: Add text overlay to the model image template.
+            // Use custom prompt if provided, otherwise generate default variation prompt
+            let variationPrompt = customPrompt || "";
+
+            if (!variationPrompt) {
+                // Fallback to default generation logic if no custom prompt
+                const textStyle = patternData?.characteristics?.textStyle || "bold white with black outline";
+                const colorScheme = patternData?.characteristics?.colorScheme || "high contrast";
+                variationPrompt = `[TASK]: Add text overlay to the model image template.
 
 [MANDATORY TEXT - EXACT CHARACTERS]
 Render EXACTLY this text: "${text}"
@@ -695,24 +783,38 @@ ${patternData?.characteristics?.subjectType === 'real_person' ? `- PERSON must m
 [SPECIFICATIONS]
 - Resolution: 1280x720 (16:9)
 - 8K professional quality
-- High contrast, vibrant colors
+- Masterpiece, Best Quality, Award-winning photography
+- Sharp focus, Highly detailed, Cinematic lighting
+- Vibrant, clean, high-contrast colors
+- Perfect composition, professional color grading
 
 [NEGATIVE - ABSOLUTELY DO NOT]
 - DO NOT write text other than "${text}"
 - DO NOT change the person/character appearance
 - DO NOT add new people or elements
 - DO NOT create garbled/broken Japanese text
+- DO NOT distort faces/hands/eyes
 - DO NOT blur or distort any element
+- NO pixelation, jpeg artifacts, or low resolution
+- NO amateur, sketch, or unfinished look
 
 [VARIATION ${i + 1}]
 ${i === 0 ? 'Standard composition' : i === 1 ? 'Slightly more vibrant' : 'Alternative emphasis'}
 
 CRITICAL: The ONLY text must be "${text}". Everything else stays identical to model.`;
+            }
 
             try {
                 if (referenceImages.length > 0) {
                     const { generateImageWithReference } = await import("@/lib/gemini");
-                    return await generateImageWithReference(variationPrompt, referenceImages);
+                    try {
+                        // Attempt generation with reference
+                        return await generateImageWithReference(variationPrompt, referenceImages);
+                    } catch (refError) {
+                        // Fallback to text-only if reference fails (e.g. image too large, network error)
+                        console.warn(`[Final Gen] Variation ${i} failed with reference, retrying without ref.`, refError);
+                        return await generateThumbnailImage(variationPrompt);
+                    }
                 } else {
                     return await generateThumbnailImage(variationPrompt);
                 }

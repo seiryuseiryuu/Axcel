@@ -313,10 +313,12 @@ ${analysisTarget}
 【分析指示】
 1. **一人称の特定**: 字幕の中から「僕」「私」「俺」「自分」などの一人称を探し出してください。見つからない場合は文脈から推測してください。
 2. **視聴者への呼びかけ**: 「皆さん」「あなた」「君」などの呼びかけを探してください。
-3. **語尾パターン**: 実際に使われている語尾を最低3つ抽出してください（例：〜ですね、〜じゃないですか、〜んですよ）
+3. **語尾パターン**: 実際に使われている語尾を最低3つ抽出してください（例：〜ですね, 〜なんですよね, 〜というわけです）。
+    - 曖昧な語尾ではなく、その人特有の口癖を含めてください。
 4. **話し方の特徴**: テンション、スピード、説明の丁寧さなどを分析してください。
 5. **専門性**: どの分野の専門家か、どんな知識を持っているかを推測してください。
 6. **定型挨拶（重要）**: 「冒頭の挨拶（OP）」と「締めの挨拶（ED）」を特定してください。これらは台本作成時にそのまま使うので、**一字一句正確に**抽出してください。
+7. **トーン**: 親近感、権威性、情熱など、視聴者が感じる印象を具体的に言語化してください（例：デュエマプレイヤーとしての親近感を持ちつつ、環境の変化や予想外の事象に対しては驚きと分析を交えた情報提供者としてのトーン）。
 
 【出力形式】以下のJSON形式で出力してください。**全ての項目を具体的に埋めてください**：
 \`\`\`json
@@ -734,7 +736,8 @@ export async function writeScript(
     selectedImprovements: { type: string; content: string }[],
     channelStyle: any,
     referenceUrl?: string,
-    originalTranscript?: string
+    originalTranscript?: string,
+    improvementData?: any // New: Structured improvement data
 ) {
     // 元動画の字幕がある場合、口調分析を追加
     let toneAnalysis = "";
@@ -820,6 +823,41 @@ ${originalTranscript}
 `;
     }
 
+    // Prepare improvements context
+    let improvementsContext = "";
+    if (improvementData && improvementData.improvementAxes) {
+        // 使用可能な形式の改善データがある場合（新形式）
+        const activeAxes = improvementData.improvementAxes.filter((a: any) => a.selected !== false);
+
+        improvementsContext = `
+==========================================
+【重要：台本への反映事項（改善方針）】
+==========================================
+以下の「改善の軸」と「構成案」に基づいて、元動画をアップグレードした台本を作成してください。
+
+### 1. 改善のコンセプト（これらを台本全体に反映させてください）
+${activeAxes.map((axis: any) => `- **${axis.axisName}**: ${axis.description} (意図: ${axis.reason})`).join('\n')}
+
+### 2. 構成の変更点（gapAnalysis）
+${improvementData.gapAnalysis ? `- 課題: ${improvementData.gapAnalysis.originalVideoIssue}\n- 解決策: ${improvementData.gapAnalysis.proposedSolution}` : ''}
+
+### 3. 具体的な構成案（contentStructure）
+${improvementData.contentStructure ? JSON.stringify(improvementData.contentStructure, null, 2) : ''}
+`;
+    } else if (selectedImprovements && selectedImprovements.length > 0) {
+        // 旧形式のフォールバック
+        improvementsContext = `
+==========================================
+【重要：台本への反映事項】
+==========================================
+元動画の構成をベースにしつつ、以下の改善点を**必ず**盛り込んでください：
+
+${selectedImprovements.map(i => `- 【${i.type === 'add' ? '追加' : '削除'}】 ${i.content}`).join('\n')}
+`;
+    } else {
+        improvementsContext = "【改善事項】特になし（元動画の構成を維持してください）";
+    }
+
     const prompt = `あなたは超一流のYouTube構成作家であり、**カメレオン俳優**です。
 指定された人物（元動画の話者またはチャンネルのスタイル）に完全になりきって台本を書いてください。
 
@@ -839,8 +877,7 @@ ${structureAnalysis}
 【想定視聴者】
 ${viewerNeeds}
 
-【採用する改善点】
-${selectedImprovements.map(i => `${i.type === 'add' ? '✅ 追加' : '❌ 削除'} ${i.content}`).join('\n')}
+${improvementsContext}
 
 ==========================================
 【台本作成の指示】

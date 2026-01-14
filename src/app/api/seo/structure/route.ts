@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { gemini as genAI } from "@/lib/gemini";
 import { StructureAnalysisRequest, ArticleStructureAnalysis } from "@/types/seo-types";
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
+
+// Removed local instantiation to use centralized config
+// const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,6 +13,9 @@ export async function POST(req: NextRequest) {
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
+    // Safe truncation
+    const safeContent = (articleContent || "").substring(0, 15000);
+
     const prompt = `あなたはSEO記事の構成分析の専門家です。
 以下の記事を詳細に分析してください。
 
@@ -18,7 +23,7 @@ export async function POST(req: NextRequest) {
 ${articleTitle}
 
 【記事本文】
-${articleContent.substring(0, 10000)}
+${safeContent}
 
 【分析項目】
 
@@ -81,30 +86,34 @@ ${modificationInstructions ? `
     const result = await model.generateContent(prompt);
     const text = result.response.text();
 
-    // Remove markdown code blocks if present
+    console.log("[Structure API] Raw response:", text.substring(0, 200) + "...");
+
+    // Robust JSON parsing
     let cleanedText = text.trim();
-    if (cleanedText.startsWith("```json")) {
-      cleanedText = cleanedText.slice(7);
-    } else if (cleanedText.startsWith("```")) {
-      cleanedText = cleanedText.slice(3);
-    }
-    if (cleanedText.endsWith("```")) {
-      cleanedText = cleanedText.slice(0, -3);
-    }
-    cleanedText = cleanedText.trim();
+    // Remove markdown code blocks
+    cleanedText = cleanedText.replace(/```json\s*/g, "").replace(/```\s*/g, "");
 
-    const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error("Failed to parse structure AI response:", text.substring(0, 500));
-      throw new Error("構成分析の解析に失敗しました。もう一度お試しください。");
+    // Find the first '{' and last '}'
+    const firstBrace = cleanedText.indexOf('{');
+    const lastBrace = cleanedText.lastIndexOf('}');
+
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      cleanedText = cleanedText.substring(firstBrace, lastBrace + 1);
     }
 
-    const analysis: ArticleStructureAnalysis = JSON.parse(jsonMatch[0]);
+    let analysis: ArticleStructureAnalysis;
+    try {
+      analysis = JSON.parse(cleanedText);
+    } catch (e) {
+      console.error("[Structure API] JSON Parse Error:", e);
+      console.error("[Structure API] Cleaned Text:", cleanedText);
+      throw new Error("AIからの応答を解析できませんでした。もう一度お試しください。");
+    }
 
     return NextResponse.json({ success: true, data: analysis });
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error("SEO Structure Analysis Error:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = error.message || "Unknown error";
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
