@@ -3,10 +3,49 @@
 import { generateText } from "@/lib/gemini";
 import { requireRole } from "@/lib/rbac";
 import { tavily } from "@tavily/core";
+import { createClient } from "@/lib/supabase/server";
+import { saveCreation } from "@/app/actions/history";
 
 export interface StudioState {
   result?: string;
   error?: string;
+}
+
+export interface StudioAccessResult {
+  hasAccess: boolean;
+  role?: string;
+  expiresAt?: Date | null;
+  daysRemaining?: number | null;
+  isExpired?: boolean;
+  message?: string;
+}
+
+export async function checkStudioAccess(): Promise<StudioAccessResult> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { hasAccess: false, message: "ログインが必要です" };
+  }
+
+  // Check Role
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || (profile.role !== 'student' && profile.role !== 'admin')) {
+    return { hasAccess: false, message: "アクセス権限がありません (Role missing)" };
+  }
+
+  // Mock subscription check for now (or integrate with real DB column if exists)
+  // For now, allow access if role is correct.
+  return {
+    hasAccess: true,
+    role: profile.role,
+    daysRemaining: 99 // Mock value
+  };
 }
 
 // Initialize Tavily Client
@@ -56,12 +95,14 @@ export async function generateContentAction(prevState: StudioState, formData: Fo
     // Determine tool type from toolPath or type
     const toolType = toolPath?.split("/").pop() || type;
 
-    // Get search context for relevant tools
-    let searchContext = "";
+    // Get search context and current time
+    const now = new Date().toLocaleString("ja-JP");
+    let searchContext = `現在日時: ${now}\n`;
+
     if (["seo", "script", "note-writing", "sales-letter", "lp-writing"].includes(toolType)) {
       const intent = await analyzeIntent(topic || formData.get("product") as string, target);
       if (intent.searchQueries.length > 0) {
-        searchContext = await searchWeb(intent.searchQueries[0]);
+        searchContext += await searchWeb(intent.searchQueries[0]);
       }
     }
 
@@ -1373,6 +1414,25 @@ ${materialFormat || "動画＋テキスト＋ワークシート"}
     }
 
     const result = await generateText(prompt, 0.7);
+
+    // Save to History
+    try {
+      const inputData: Record<string, any> = {};
+      formData.forEach((value, key) => {
+        inputData[key] = value;
+      });
+
+      await saveCreation({
+        tool_name: toolType, // Simple fallback
+        tool_path: toolPath || `/studio/${toolType}`,
+        category: "content",
+        input_data: inputData,
+        output_content: result
+      });
+    } catch (saveError) {
+      console.error("Failed to save history in studio action:", saveError);
+    }
+
     return { result };
 
   } catch (e: any) {

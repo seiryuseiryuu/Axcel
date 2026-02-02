@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { gemini as genAI } from "@/lib/gemini";
+import { generateText } from "@/lib/gemini";
 import { StructureAnalysisRequest, ArticleStructureAnalysis } from "@/types/seo-types";
 
 
@@ -10,8 +10,6 @@ export async function POST(req: NextRequest) {
   try {
     const body: StructureAnalysisRequest = await req.json();
     const { articleTitle, articleContent, modificationInstructions } = body;
-
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     // Safe truncation
     const safeContent = (articleContent || "").substring(0, 15000);
@@ -32,7 +30,7 @@ ${safeContent}
    - 語順の意図
    - 読者を惹きつける要素
    - クリックされる理由
-   ※数字の有無だけでなく、構成の本質を分析すること
+   - ※数字の有無だけでなく、構成の本質を分析すること
 
 2. H2ごとの詳細分析
    各H2について以下を分析：
@@ -83,8 +81,7 @@ ${modificationInstructions ? `
   }
 }`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const text = await generateText(prompt, 0.7, "gemini-2.0-flash");
 
     console.log("[Structure API] Raw response:", text.substring(0, 200) + "...");
 
@@ -117,3 +114,6 @@ ${modificationInstructions ? `
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
+
+
+export const maxDuration = 60; // 1 minute timeout for structure analysis

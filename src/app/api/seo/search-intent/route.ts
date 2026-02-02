@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateText } from "@/lib/gemini";
 import { SearchIntentRequest, SearchIntentAnalysis } from "@/types/seo-types";
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
 
 export async function POST(req: NextRequest) {
     try {
         const body: SearchIntentRequest = await req.json();
         const { primaryKeyword, referenceArticles } = body;
-
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
         const articlesInfo = referenceArticles.map((article, i) =>
             `記事${i + 1}: ${article.title}\n見出し: ${article.h2List.join(", ")}`
@@ -45,8 +42,7 @@ ${articlesInfo}
   "requiredTopics": ["トピック1", "トピック2", "トピック3"]
 }`;
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
+        const text = await generateText(prompt, 0.7, "gemini-2.0-flash");
 
         // Remove markdown code blocks if present
         let cleanedText = text.trim();

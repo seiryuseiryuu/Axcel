@@ -1,4 +1,13 @@
 import type { NextConfig } from "next";
+// @ts-ignore
+import withPWAInit from "next-pwa";
+
+const withPWA = withPWAInit({
+  dest: "public",
+  register: true,
+  skipWaiting: true,
+  disable: process.env.NODE_ENV === "development",
+});
 
 const nextConfig: NextConfig = {
   images: {
@@ -26,10 +35,12 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  // @ts-ignore
-  eslint: {
-    ignoreDuringBuilds: true,
+
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '5mb',
+    },
   },
 };
 
-export default nextConfig;
+export default withPWA(nextConfig);

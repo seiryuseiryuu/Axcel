@@ -11,7 +11,7 @@ import {
     BookText, Video, Image, Cpu, ImagePlus, FileVideo,
     Twitter, Instagram, Presentation, MessageSquare, FileText,
     Mail, Layout, MonitorPlay, Package, GitBranch, Scissors,
-    ChevronLeft, ChevronRight, Palette, Sparkles, Users
+    ChevronLeft, ChevronRight, Palette, Sparkles, Users, Clock
 } from "lucide-react";
 
 interface ToolItem {
@@ -26,22 +26,22 @@ const tools: ToolItem[] = [
     // Content Tools
     { title: "SEO記事作成", href: "/admin/studio/seo", icon: BookText, category: "content" },
     { title: "YouTube台本", href: "/admin/studio/script", icon: Video, category: "content" },
-    { title: "ショート動画台本", href: "/admin/studio/short-script", icon: FileVideo, category: "content", comingSoon: true },
-    { title: "X・Threads投稿", href: "/admin/studio/social-post", icon: Twitter, category: "content", comingSoon: true },
-    { title: "note文章", href: "/admin/studio/note-writing", icon: FileText, category: "content", comingSoon: true },
+    { title: "ショート動画台本", href: "/admin/studio/short-script", icon: FileVideo, category: "content" },
+    { title: "X・Threads投稿", href: "/admin/studio/social-post", icon: Twitter, category: "content" },
+    { title: "note文章", href: "/admin/studio/note-writing", icon: FileText, category: "content" },
+    { title: "LPライティング", href: "/admin/studio/lp-writing", icon: Layout, category: "content" },
+    { title: "セールスレター", href: "/admin/studio/sales-letter", icon: Mail, category: "content" },
 
     // Image Tools
     { title: "YouTubeサムネイル", href: "/admin/studio/thumbnail", icon: Image, category: "image" },
     { title: "ブログアイキャッチ", href: "/admin/studio/eyecatch", icon: ImagePlus, category: "image", comingSoon: true },
     { title: "インスタストーリーズ", href: "/admin/studio/insta-story", icon: Instagram, category: "image", comingSoon: true },
-    { title: "LINEバナー", href: "/admin/studio/line-banner", icon: MessageSquare, category: "image", comingSoon: true },
-    { title: "note/Brain/Tips", href: "/admin/studio/note-thumbnail", icon: FileText, category: "image", comingSoon: true },
-
-    // Copywriting Tools
-    // Strategy Tools
+    { title: "LINEバナー", href: "/admin/studio/line-banner", icon: MessageSquare, category: "image" },
+    { title: "note/Brain/Tips", href: "/admin/studio/note-thumbnail", icon: FileText, category: "image" },
 
     // Admin Tools
     { title: "ユーザー管理", href: "/admin/users", icon: Users, category: "admin" },
+    { title: "生成履歴", href: "/admin/history", icon: Clock, category: "admin" },
 ];
 
 const categories = [

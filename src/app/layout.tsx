@@ -23,8 +23,19 @@ export const metadata: Metadata = {
   description: "Accel - AIツールを搭載した次世代のマネタイズ支援システム",
   manifest: "/manifest.json",
   icons: {
-    icon: "/icons/icon-72x72.png",
-    apple: "/icons/icon-192x192.png",
+    icon: "/icons/icon-192x192.png",
+    apple: "/icons/icon-512x512.png",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "AI Studio",
+    startupImage: [
+      "/icons/icon-512x512.png",
+    ],
+  },
+  formatDetection: {
+    telephone: false,
   },
 };
 
@@ -33,7 +44,13 @@ export const viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  userScalable: false,
+  interactiveWidget: "resizes-content",
 };
+
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+
+
 
 export default function RootLayout({
   children,
@@ -55,6 +72,7 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
+          <ServiceWorkerRegister />
           {children}
           <div className="fixed bottom-4 left-4 z-50">
             <ThemeCustomizer />

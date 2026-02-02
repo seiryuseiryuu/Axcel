@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { load } from "cheerio";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateText } from "@/lib/gemini";
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
 
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
                     ).join('\n')}\n`;
                 }
 
-                const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+                // const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" }); // Removed direct instantiation
                 const prompt = `あなたは内部リンク最適化の専門家です。
 
 ${articleContext}
@@ -147,9 +148,9 @@ ${articleContext}
 以下の記事リストから、上記の記事内容と**直接的に関連する記事のみ**を厳選してください。
 
 【選定基準（厳格に適用）】
-1. 記事のH2/H3見出しで触れているトピックと**直接関連**している
-2. 読者が「これについてもっと詳しく知りたい」と思う内容である
-3. 単なるカテゴリ的な関連（同じジャンル）ではなく、**具体的な補足情報**を提供できる
+1. 記事のH2/H3見出し（構成案）で扱われている特定のトピックと**直接的に関連**しているかを最優先する
+2. 読者がその見出しの内容を読んだ後に「もっと詳しく知りたい」と思う具体的な補足情報であるか
+3. 単なるカテゴリ的な関連（同じジャンル）は除外・低評価にする
 
 【除外基準】
 - タイトルが一般的すぎる記事
@@ -169,8 +170,9 @@ ${articleContext}
 ${candidateLinks.map((l, i) => `${i + 1}. ${l.title} | ${l.url}`).join("\n")}
 `;
 
-                const result = await model.generateContent(prompt);
-                const text = result.response.text();
+                const text = await generateText(prompt, 0.7, "gemini-2.0-flash");
+                // const result = await model.generateContent(prompt);
+                // const text = result.response.text();
 
                 // Remove markdown code blocks if present
                 let cleanedText = text.trim();

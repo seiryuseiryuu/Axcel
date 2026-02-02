@@ -139,47 +139,51 @@ export async function analyzeChannelFromChannelUrl(channelUrl: string) {
 
         console.log("[analyzeChannelFromChannelUrl] Channel found:", channelInfo.data.name);
 
-        // 2. Fetch Recent Videos (長尺動画のみ、ショートは除外)
-        // fetchChannelVideosはショート動画を自動的に除外するので、10本取得して最新3本を使用
-        const videos = await fetchChannelVideos(channelInfo.data.id, channelInfo.data.uploadsPlaylistId, 10);
+        // 2. Fetch Recent Videos (Fetch more candidates to find ones with transcripts)
+        // Retrieve 15 videos to increase chances of finding ones with transcripts
+        const videos = await fetchChannelVideos(channelInfo.data.id, channelInfo.data.uploadsPlaylistId, 15);
         if (!videos.success || !videos.data || videos.data.length === 0) {
-            return { success: false, error: "チャンネルの長尺動画が見つかりませんでした（ショート動画は除外されます）" };
+            return { success: false, error: "チャンネルの動画が見つかりませんでした" };
         }
 
-        // 3. Select top 3 videos and fetch transcripts
-        // We need to fetch transcripts for these videos to perform style analysis
-        const recentVideos = videos.data.slice(0, 3);
-        const videoUrls = recentVideos.map(v => `https://www.youtube.com/watch?v=${v.video_id}`);
+        console.log(`[analyzeChannelFromChannelUrl] Found ${videos.data.length} recent videos. Fetching transcripts...`);
 
-        console.log("[analyzeChannelFromChannelUrl] Analyzing videos:", videoUrls);
-
-        // Reuse existing logic to fetch transcripts
-        // We'll reimplement the parallel fetch here to also return the video metadata for UI display
-        const videoAnalyses = await Promise.all(recentVideos.map(async (video) => {
+        // 3. Fetch transcripts for candidates in parallel
+        const candidates = await Promise.all(videos.data.map(async (video) => {
             const url = `https://www.youtube.com/watch?v=${video.video_id}`;
             const data = await fetchVideoData(url);
 
-            if (data.success && data.data?.hasTranscript && data.data.transcript) {
-                return {
-                    url,
-                    transcript: data.data.transcript,
-                    title: video.video_title,
-                    thumbnail: video.thumbnail_url
-                };
-            }
-            return null;
+            return {
+                url,
+                title: video.video_title,
+                thumbnail: video.thumbnail_url,
+                // Consider it having a transcript only if it's reasonably long
+                transcript: (data.success && data.data?.transcript && data.data.transcript.length > 50) ? data.data.transcript : "",
+                hasTranscript: (data.success && data.data?.hasTranscript && data.data.transcript.length > 50)
+            };
         }));
 
-        const validVideos = videoAnalyses.filter((v): v is { url: string; transcript: string; title: string; thumbnail: string } => v !== null);
+        // 4. Prioritize videos with transcripts
+        // Sort: Has Transcript > Index (Recency)
+        const sortedCandidates = candidates.sort((a, b) => {
+            if (a.hasTranscript && !b.hasTranscript) return -1;
+            if (!a.hasTranscript && b.hasTranscript) return 1;
+            return 0; // Maintain original order (recency)
+        });
+
+        // Take top 3 suitable videos
+        const validVideos = sortedCandidates.slice(0, 3);
+
+        console.log("[analyzeChannelFromChannelUrl] Selected videos for analysis:", validVideos.map(v => `${v.title} (Transcript: ${v.hasTranscript})`));
 
         if (validVideos.length === 0) {
             return {
                 success: false,
-                error: "有効な字幕データを持つ動画が見つかりませんでした（最新3件を分析）。"
+                error: "分析可能な動画が見つかりませんでした。"
             };
         }
 
-        // 4. Analyze Style (with metadata)
+        // 5. Analyze Style (with metadata)
         const styleResult = await analyzeChannelStyle(
             validVideos,
             channelInfo.data.name,
@@ -233,7 +237,7 @@ export async function analyzeChannelFromUrls(urls: string[]) {
         if (validVideos.length === 0) {
             return {
                 success: false,
-                error: "有効な字幕データが取得できませんでした。URLを確認するか、字幕のある動画を指定してください。"
+                error: "有効な動画データが取得できませんでした。URLを確認してください。"
             };
         }
 
@@ -253,10 +257,15 @@ export async function analyzeChannelStyle(
     channelName: string = "",
     videoTitles: string[] = []
 ) {
+    // Gemini 1.5 Pro has large context context, so we can increase the limit significantly
+    // Increased from 4000 to 30000 chars per video to capture full context
     const transcripts = channelVideos
-        .filter(v => v.transcript && v.transcript.length > 100)
-        .slice(0, 3)
-        .map((v, i) => `【動画${i + 1}のタイトル】${videoTitles[i] || '（不明）'}\n【動画${i + 1}の発言内容】\n${v.transcript.slice(0, 4000)}`)
+        .map((v, i) => {
+            const content = v.transcript && v.transcript.length > 50
+                ? v.transcript.slice(0, 30000)
+                : "（字幕データなし）";
+            return `【動画${i + 1}のタイトル】${videoTitles[i] || '（不明）'}\n【動画${i + 1}の発言内容】\n${content}`;
+        })
         .join('\n\n');
 
     // 画像データの取得（最初3件のみ）
@@ -274,7 +283,9 @@ export async function analyzeChannelStyle(
                     if (!res.ok) return null;
                     const buffer = await res.arrayBuffer();
                     const base64 = Buffer.from(buffer).toString('base64');
-                    const mimeType = res.headers.get('content-type') || 'image/jpeg';
+                    // Simple mime type detection or fallback
+                    const contentType = res.headers.get('content-type');
+                    const mimeType = contentType && contentType.startsWith('image/') ? contentType : 'image/jpeg';
                     return { mimeType, data: base64 };
                 } catch { return null; }
             });
@@ -289,66 +300,66 @@ export async function analyzeChannelStyle(
         }
     }
 
-    // If no transcripts, use titles as fallback context
-    const analysisTarget = transcripts || channelVideos.map((v, i) => `【動画${i + 1}のタイトル】${videoTitles[i] || '（不明）'}\n（字幕データ取得不可）`).join('\n\n');
-
-    // Remove the early return that was returning dummy data
-    // Instead, we proceed to let the AI infer from titles/channel name
-
     const metadataContext = channelName ? `\n【チャンネル名】\n${channelName}\n※このチャンネル名から話者の名前や属性を推測できる場合は活用してください。` : "";
 
-    const prompt = `あなたは超優秀な言語分析の専門家です。以下の動画字幕（または動画情報）から、話者の特徴を**必ず具体的に**抽出してください。
+    const prompt = `あなたは超優秀な言語分析の専門家であり、トップクラスの**モノマネ芸人**です。
+    以下の動画字幕（または動画情報）から、話者の特徴を**完全に再現できるように**具体的に抽出してください。
     ${imageParts.length > 0 ? '\n\n【参考】：提供されたサムネイル画像からも、チャンネルのターゲット層や雰囲気を分析してください。' : ''}
 
-【重要なルール】
-- 「不明」「分かれば」などの曖昧な回答は禁止です
-- 字幕に明確な情報がない場合でも、チャンネル名や動画タイトル、字幕内容から推測して具体的に答えてください
-- 一人称は字幕から「僕」「私」「俺」「自分」などを探して特定してください
-- 語尾は実際に使われているものを3つ以上抽出してください
+    【重要なルール】
+    - 「不明」「分かれば」などの曖昧な回答は禁止です
+    - 字幕に明確な情報がない場合でも、チャンネル名や動画タイトル、字幕内容, サムネイルから推測して具体的に答えてください
+    - 一人称は字幕から「僕」「私」「俺」「自分」などを探して特定してください
+    - 語尾は実際に使われているものを3つ以上抽出してください
 
-${metadataContext}
+    ${metadataContext}
 
-${analysisTarget}
+    ${transcripts}
 
-【分析指示】
-1. **一人称の特定**: 字幕の中から「僕」「私」「俺」「自分」などの一人称を探し出してください。見つからない場合は文脈から推測してください。
-2. **視聴者への呼びかけ**: 「皆さん」「あなた」「君」などの呼びかけを探してください。
-3. **語尾パターン**: 実際に使われている語尾を最低3つ抽出してください（例：〜ですね, 〜なんですよね, 〜というわけです）。
-    - 曖昧な語尾ではなく、その人特有の口癖を含めてください。
-4. **話し方の特徴**: テンション、スピード、説明の丁寧さなどを分析してください。
-5. **専門性**: どの分野の専門家か、どんな知識を持っているかを推測してください。
-6. **定型挨拶（重要）**: 「冒頭の挨拶（OP）」と「締めの挨拶（ED）」を特定してください。これらは台本作成時にそのまま使うので、**一字一句正確に**抽出してください。
-7. **トーン**: 親近感、権威性、情熱など、視聴者が感じる印象を具体的に言語化してください（例：デュエマプレイヤーとしての親近感を持ちつつ、環境の変化や予想外の事象に対しては驚きと分析を交えた情報提供者としてのトーン）。
+    【分析指示】
+    1. **一人称の特定**: 字幕の中から「僕」「私」「俺」「自分」などの一人称を探し出してください。見つからない場合は文脈から推測してください。
+    2. **視聴者への呼びかけ**: 「皆さん」「あなた」「君」などの呼びかけを探してください。
+    3. **語尾パターン**: 実際に使われている語尾を最低3つ抽出してください（例：〜ですね, 〜なんですよね, 〜というわけです）。
+       - 曖昧な語尾ではなく、その人特有の口癖を含めてください。
+    4. **話し方の特徴（憑依レベル）**: 話者のペルソナを憑依させるために必要な、具体的な話し方のクセ、間、抑揚の特徴、よく使う言い回しを分析してください。
+    5. **専門性**: どの分野の専門家か、どんな知識を持っているかを推測してください。
+    6. **定型挨拶（最重要）**: 「冒頭の挨拶（OP）」と「締めの挨拶（ED）」を特定してください。
+       - これらは台本作成時に**そのままコピペして使う**ため、一字一句正確に抽出してください。
+       - なければ、このチャンネルにありそうな挨拶を創作してください。
+    7. **トーン**: 親近感、権威性、情熱など、視聴者が感じる印象を具体的に言語化してください。
 
-【出力形式】以下のJSON形式で出力してください。**全ての項目を具体的に埋めてください**：
-\`\`\`json
-{
-  "name": "話者の名前（字幕で自己紹介があれば。なければチャンネル名から推測）。推測も不可なら「${channelName || '（特定不可）'}の中の人」",
-  "title": "話者の肩書き・専門分野（例：資産運用アドバイザー、FP、投資家など）",
-  "speakingStyle": "話し方の特徴を詳しく（例：落ち着いた解説調、熱量高めの説得調）",
-  "firstPerson": "一人称（僕/私/俺/自分など。必ず1つ特定）",
-  "secondPerson": "視聴者への呼びかけ（皆さん/あなた/視聴者の方など必ず1つ特定）",
-  "endings": ["語尾1", "語尾2", "語尾3"],
-  "tone": "全体的なトーン（例：親しみやすいが権威的、危機感を煽る調子など）",
-  "catchphrases": ["よく使うフレーズ1", "よく使うフレーズ2"],
-  "expertise": "専門性・知識領域（例：資産運用、老後資金、iDeCo/NISAなど）",
-  "opening": "冒頭の定型挨拶（例：こんにちは、〇〇です）。なければ「こんにちは、[名前]です」と推測して作成",
-  "closing": "締めの定型挨拶（例：最後までご覧いただきありがとうございました、チャンネル登録お願いします）。なければ一般的なYoutubeの締めを作成"
-}
-\`\`\`
+    【出力形式】以下のJSON形式で出力してください。**全ての項目を具体的に埋めてください**：
+    \`\`\`json
+    {
+      "name": "話者の名前（字幕で自己紹介があれば。なければチャンネル名から推測）。推測も不可なら「${channelName || '（特定不可）'}の中の人」",
+      "title": "話者の肩書き・専門分野（例：資産運用アドバイザー、FP、投資家など）",
+      "speakingStyle": "話し方の特徴・クセ（「〜」を多用する、早口で畳み掛ける、など再現に必要な情報）",
+      "firstPerson": "一人称（僕/私/俺/自分など。必ず1つ特定）",
+      "secondPerson": "視聴者への呼びかけ（皆さん/あなた/視聴者の方など必ず1つ特定）",
+      "endings": ["語尾1", "語尾2", "語尾3"],
+      "tone": "全体的なトーン（例：親しみやすいが権威的、危機感を煽る調子など）",
+      "catchphrases": ["よく使うフレーズ1", "よく使うフレーズ2"],
+      "expertise": "専門性・知識領域（例：資産運用、老後資金、iDeCo/NISAなど）",
+      "opening": "冒頭の定型挨拶（例：こんにちは、〇〇です）。",
+      "closing": "締めの定型挨拶（例：最後までご覧いただきありがとうございました、チャンネル登録お願いします）。"
+    }
+    \`\`\`
 
-**重要：「不明」という回答は絶対に禁止です。必ず具体的な内容を出力してください。**`;
+    **重要：「不明」という回答は絶対に禁止です。必ず具体的な内容を出力してください。**`;
 
     try {
-        // Use gemini-2.0-flash for speed (用戶要望: "ぱっと出すように")
-        // Temperature 0.4 for balance between creativity and consistency
+        // Use gemini-2.0-flash for speed (用戶要望: "ぱっと出すように") - User requested speed before, but for tone analysis accuracy is key.
+        // However, 1.5-pro is standard for analysis. 2.0-flash is faster and good too.
+        // Let's stick to 1.5-pro as it's reliable for "reading between lines" and handling large context.
+        // Updated to process large context of transcripts.
+
         let result;
         if (imageParts.length > 0) {
             // Multimodal analysis
             result = await generateMultimodal(prompt, imageParts);
         } else {
-            // Text only
-            result = await generateText(prompt, 0.4, "gemini-2.0-flash");
+            // Text only - Use gemini-1.5-pro for better nuance analysis
+            result = await generateText(prompt, 0.5, "gemini-1.5-pro");
         }
 
         const match = result.match(/\{[\s\S]*\}/);
@@ -730,6 +741,42 @@ JSON形式で出力してください。絵文字は使用しないでくださ�
     return { success: false, error: `改善提案の生成に失敗しました: ${lastError}` };
 }
 
+export async function regenerateStructure(
+    currentStructure: string,
+    improvements: { type: string; content: string }[],
+    userInstructions: string
+) {
+    const prompt = `あなたは超一流のYouTube構成作家です。
+    以下の「現在の構成案」を、指定された「改善点」と「追加指示」に基づいて修正し、新しい構成案を作成してください。
+
+    【現在の構成案】
+    ${currentStructure}
+
+    【適用すべき改善点（最優先で反映）】
+    ${improvements.map(i => `- [${i.type === 'add' ? '追加' : '削除'}] ${i.content}`).join('\n')}
+
+    【ユーザーからの追加指示（最優先で反映）】
+    ${userInstructions || "特になし"}
+
+    【重要：出力形式のルール】
+    1. **H3相当の小見出しは、Markdownの「###」を使わず、「■ （黒四角＋半角スペース）」を使用してください。**
+       - ❌ 悪い例: ### 具体的な手順
+       - ✅ 良い例: ■ 具体的な手順
+    2. H2（大見出し）はそのまま「##」を使用してください。
+    3. 構成のフォーマット（Markdownの表など）は崩さず、内容だけを修正してください。
+    4. 改善指示にない部分は、元の良さを活かしたまま維持してください。
+
+    【出力形式】
+    修正後の構成案のみをMarkdown形式で出力してください。冒頭の挨拶などは一切不要です。`;
+
+    try {
+        const result = await generateText(prompt, 0.7, "gemini-1.5-pro");
+        return { success: true, data: result };
+    } catch (e: any) {
+        return { success: false, error: e.message || "構成の再生成に失敗しました" };
+    }
+}
+
 export async function writeScript(
     structureAnalysis: string,
     viewerNeeds: string,
@@ -859,167 +906,171 @@ ${selectedImprovements.map(i => `- 【${i.type === 'add' ? '追加' : '削除'}�
     }
 
     const prompt = `あなたは超一流のYouTube構成作家であり、**カメレオン俳優**です。
-指定された人物（元動画の話者またはチャンネルのスタイル）に完全になりきって台本を書いてください。
+    指定された人物（元動画の話者またはチャンネルのスタイル）に完全になりきって台本を書いてください。
 
-${transcriptContext}
+    ${transcriptContext}
 
-${targetLengthInfo}
+    ${targetLengthInfo}
 
-${toneAnalysis}
+    ${toneAnalysis}
 
-==========================================
-【分析結果】
-==========================================
+    ==========================================
+    【分析結果】
+    ==========================================
 
-【構成分析】
-${structureAnalysis}
+    【確定した構成案（これを厳守して執筆すること）】
+    ${structureAnalysis}
 
-【想定視聴者】
-${viewerNeeds}
+    【想定視聴者】
+    ${viewerNeeds}
 
-${improvementsContext}
+    ${improvementsContext}
 
-==========================================
-【台本作成の指示】
-==========================================
+    ==========================================
+    【台本作成の指示】
+    ==========================================
 
-## 出力フォーマット（Markdown）
+    ## 出力フォーマット（Markdown）
 
-# 📝 YouTube台本
+    # 📝 YouTube台本
 
----
+    ---
 
-## OP（冒頭）
+    ## OP（冒頭）
 
-### 🎯 インパクトのある結果提示
-> （視聴者の注目を引く強烈なフックから始める。）
+    ### 🎯 インパクトのある結果提示
+    > （視聴者の注目を引く強烈なフックから始める。）
 
-### 👋 挨拶（3秒以内）
-### 👋 挨拶（3秒以内）
-> **必ず以下の定型挨拶を使用してください：**
-> "${channelStyle.opening || "こんにちは、[名前]です。"}"
-> ※状況に合わせて微調整しても良いですが、基本の型は崩さないでください。
+    ### 👋 挨拶（3秒以内）
+    > **必ず以下の定型挨拶を使用してください：**
+    > "${channelStyle.opening || "こんにちは、[名前]です。"}"
+    > ※状況に合わせて微調整しても良いですが、基本の型は崩さないでください。
 
----
+    ---
 
-## PASTOR（問題提起〜解決への導入）
+    ## PASTOR（問題提起〜解決への導入）
 
-### 💭 視聴者への共感
-> （具体的な悩みに寄り添う）
+    ### 💭 視聴者への共感
+    > （具体的な悩みに寄り添う）
 
-### 😰 悩みの言語化
-> （痛みを明確にする）
+    ### 😰 悩みの言語化
+    > （痛みを明確にする）
 
-### ⚠️ 問題の拡大（放置した結果）
-> 
+    ### ⚠️ 問題の拡大（放置した結果）
+    > 
 
-### 🎁 この動画で得られること
-> 
+    ### 🎁 この動画で得られること
+    > 
 
-### ✨ 解決後の理想状態
-> 
+    ### ✨ 解決後の理想状態
+    > 
 
-### 🏆 実績・信頼性の提示
-> 
+    ### 🏆 実績・信頼性の提示
+    > 
 
-### 📲 LINE・チャンネル登録誘導
-> 
+    ### 📲 LINE・チャンネル登録誘導（CTA）
+    > **以下のCTA情報を必ず反映してください：**
+    > - 登録先: ${improvementData?.contentStructure?.ending?.registrationTarget || "チャンネル登録"}
+    > - メリット: ${improvementData?.contentStructure?.ending?.registrationBenefit || "最新情報をお届け"}
+    > - 誘導文言: 「${improvementData?.contentStructure?.ending?.callToAction || "今のうちに登録しておいてください"}」
 
----
+    ---
 
-## プレ本編
+    ## プレ本編
 
-### 💡 衝撃の結論（常識の破壊）
-> 
+    ### 💡 衝撃の結論（常識の破壊）
+    > 
 
-### 📊 根拠・理由
-> 
+    ### 📊 根拠・理由
+    > 
 
-### 📌 具体例
-> 
+    ### 📌 具体例
+    > 
 
-### 🚀 アクションプラン
-> 
+    ### 🚀 アクションプラン
+    > 
 
-### ➡️ メインテーマへの導入
-> 
+    ### ➡️ メインテーマへの導入
+    > 
 
----
+    ---
 
-## 本編
+    ## 本編
 
-【重要】元動画で話されている内容（もしあれば）を**全て網羅**し、さらに上記の【採用する改善点】を深く反映させること。
-単に改善点を列挙するのではなく、**台本の内容そのものを改善点に基づいて書き換えてください。**
-**各項目300文字以上**を目指して具体的に記述すること。
+    【重要】「確定した構成案」の内容を全て網羅すること。
+    **各項目300文字以上**を目指して具体的に記述すること。
+    小見出しは「■ 」を使用してください（### は使用禁止）。
 
-### 📍 ポイント①
-> 
+    ### 📍 ポイント①
+    > 
 
-#### 問題の具体例
-> 
+    #### ■ 問題の具体例
+    > 
 
-#### 原因
-> 
+    #### ■ 原因
+    > 
 
-#### 解決方法
-> 
+    #### ■ 解決方法
+    > 
 
-#### 実践手順
-1. 
-2. 
-3. 
+    #### ■ 実践手順
+    1. 
+    2. 
+    3. 
 
-#### 注意点・コツ
-> 
+    #### ■ 注意点・コツ
+    > 
 
----
+    ---
 
-### 📍 ポイント②
-（同様の形式で詳細に記述）
+    ### 📍 ポイント②
+    （同様の形式で詳細に記述）
 
----
+    ---
 
-### 📍 ポイント③
-（同様の形式で詳細に記述）
+    ### 📍 ポイント③
+    （同様の形式で詳細に記述）
 
----
+    ---
 
-## まとめ
+    ## まとめ
 
-### 🎯 要約・行動促進
-> 
+    ### 🎯 要約・行動促進
+    > 
 
----
+    ---
 
-## ED（エンディング）
+    ## ED（エンディング）
 
-### 💬 エモいメッセージ
-> 
+    ### 💬 エモいメッセージ
+    > 
 
-### 🎁 追加価値の提示
-> 
+    ### 🎁 追加価値の提示
+    > 
 
-### 📝 復習
-> 
+    ### 📝 復習
+    > 
 
-### 👍 評価誘導・エンディング挨拶
-> **必ず以下の定型挨拶を使用してください：**
-> "${channelStyle.closing || "最後までご覧いただきありがとうございました。"}" 
+    ### 👍 評価誘導・エンディング挨拶
+    > **必ず以下の定型挨拶を使用してください：**
+    > "${channelStyle.closing || "最後までご覧いただきありがとうございました。"}" 
 
----
+    ---
 
-【絶対守るべき制約条件】
-1. **口調の完全踏襲** - ペルソナになりきる
-2. **内容の充実** - 情報量を最大化する
-3. **絵文字完全禁止** - 一切使わない
-4. **フィラー削除** - 素読みできる整った日本語にする
+    【絶対守るべき制約条件】
+    1. **口調の完全踏襲** - ペルソナになりきる
+    2. **内容の充実** - 情報量を最大化する
+    3. **絵文字完全禁止** - 一切使わない（😊, ✨, 🔥, 💡, 📍, ⚠️ などの装飾アイコンも本文中では禁止。見出しの装飾はOKだが本文はプレーンテキストで）
+    4. **フィラー削除** - 素読みできる整った日本語にする
+    5. **H3表記** - 本文中の小見出しは「###」ではなく「■ 」を使うこと。
 
-上記のMarkdown形式で、全セクションを省略せず完成させてください。
-特に本編は具体的かつ詳細に書いてください。`;
+    上記のMarkdown形式で、全セクションを省略せず完成させてください。
+    特に本編は具体的かつ詳細に書いてください。`;
 
     // Try Gemini 3 Flash first, fallback to 2.0 Flash if not available
-    const primaryModel = "gemini-3-flash-preview";
-    const fallbackModel = "gemini-2.0-flash";
+    const primaryModel = "gemini-2.0-flash"; // Changing back to 2.0 Flash as 3-preview might be unstable or unnecessary 
+    // Actually user said prompt modification, let's stick to reliable models. 2.0 Flash is good.
+    const fallbackModel = "gemini-1.5-pro";
 
     try {
         console.log(`[writeScript] Attempting with ${primaryModel}...`);

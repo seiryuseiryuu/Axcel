@@ -28,29 +28,29 @@ export function MarkdownRenderer({ content, className = "" }: MarkdownRendererPr
                 components={{
                     // テーブルのスタイリング
                     table: ({ children }) => (
-                        <div className="overflow-x-auto my-4 rounded-lg border border-border">
+                        <div className="overflow-x-auto my-6 rounded-lg border border-border bg-card shadow-sm">
                             <table className="w-full border-collapse text-sm">
                                 {children}
                             </table>
                         </div>
                     ),
                     thead: ({ children }) => (
-                        <thead className="bg-muted/50 border-b border-border">
+                        <thead className="bg-secondary/50 border-b border-border">
                             {children}
                         </thead>
                     ),
                     th: ({ children }) => (
-                        <th className="px-4 py-3 text-left font-semibold text-foreground border-r border-border last:border-r-0">
+                        <th className="px-4 py-3 text-left font-bold text-foreground border-r border-border last:border-r-0 bg-muted/30 whitespace-nowrap">
                             {children}
                         </th>
                     ),
                     td: ({ children }) => (
-                        <td className="px-4 py-3 border-t border-r border-border last:border-r-0 align-top">
+                        <td className="px-4 py-3 border-t border-r border-border last:border-r-0 align-top whitespace-pre-wrap leading-relaxed">
                             {children}
                         </td>
                     ),
                     tr: ({ children }) => (
-                        <tr className="hover:bg-muted/30 transition-colors">
+                        <tr className="hover:bg-muted/10 transition-colors even:bg-muted/5">
                             {children}
                         </tr>
                     ),

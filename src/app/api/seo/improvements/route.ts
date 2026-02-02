@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateText } from "@/lib/gemini";
 import { ImprovementsRequest, ImprovementSuggestions } from "@/types/seo-types";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
 
 export async function POST(req: NextRequest) {
   try {
     const body: ImprovementsRequest = await req.json();
     const { readerAnalysis, structureAnalyses, modificationInstructions } = body;
-
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     // Create detailed structure summary with H2 content for each article
     const structureSummary = structureAnalyses.map((s, i) =>
@@ -63,8 +59,7 @@ ${modificationInstructions ? `
 ※「削除すべき内容」は、たとえ競合が書いていても読者ニーズに合わないものは削除提案すること。
 ※5〜7個の内容軸を出力すること`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const text = await generateText(prompt, 0.7, "gemini-2.0-flash");
 
     // Remove markdown code blocks if present
     let cleanedText = text.trim();

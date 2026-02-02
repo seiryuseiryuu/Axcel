@@ -1,41 +1,28 @@
 "use server";
 
-import { gemini, generateText, generateImage } from "@/lib/gemini";
+import { generateText, generateImage, generateImageWithReference, generateMultimodal } from "@/lib/gemini";
 import { requireRole } from "@/lib/rbac";
 
-// Types
+// Types matching the latest logic
 export interface PatternCategory {
     name: string;
     description: string;
     matchCount?: number;
     characteristics: {
-        subjectType: 'real_person' | 'illustration' | 'character' | 'none';
         textPosition: string;
-        textScale?: string;
-        sentiment?: 'positive' | 'negative' | 'neutral' | 'shocking' | 'emotional';
-        textStyle?: string;
         colorScheme: string;
-        colorMood?: string;
         personPosition: string;
-        personExpression?: string;
-        personAttributes?: {
-            ageGroup: string;
-            gender: string;
-            hairStyle: string;
-            clothing: string;
-            distinctiveFeatures?: string;
-        };
         layout: string;
-        visualTechniques?: string;
         effects?: string;
+        textStyle?: string;
+        subjectType?: string; // Kept for compatibility but mainly used in description
+        colorMood?: string;
+        visualTechniques?: string;
+        keyElement?: string;
     };
     designRules?: string[];
-    requiredMaterials?: {
-        background: string;
-        person: string;
-        props: string[];
-    };
     exampleImageIndices?: number[];
+    summary?: string; // Add summary at pattern level optionally
 }
 
 export interface PatternAnalysisResult {
@@ -45,28 +32,28 @@ export interface PatternAnalysisResult {
     individualAnalysis?: any[];
 }
 
+export interface MaterialSuggestion {
+    name: string;
+    description: string;
+    priority: 'high' | 'medium' | 'low';
+}
+
+export interface TextSuggestionItem {
+    text: string;
+    reason: string;
+}
+
 export interface ModelImageInfo {
     imageUrl: string;
     patternName: string;
     description: string;
-    suggestedTexts: { text: string; reason: string }[];
+    requiredMaterials: MaterialSuggestion[];
+    suggestedTexts: TextSuggestionItem[];
 }
 
-export interface ThumbnailState {
-    step: number;
-    videoTitle: string;
-    videoDescription: string;
-    selectedThumbnails: { id: string; url: string; title: string }[];
-    patternAnalysis: PatternAnalysisResult | null;
-    modelImages: ModelImageInfo[];
-    selectedModelIndex: number | null;
-    text: string;
-    generatedImages: string[];
-}
-
-// ========================================
+// ------------------------------------------------------------------
 // 1. Analyze Patterns (2-Stage Analysis)
-// ========================================
+// ------------------------------------------------------------------
 export async function analyzePatterns(
     thumbnailUrls: string[],
     thumbnailTitles: string[]
@@ -85,8 +72,7 @@ export async function analyzePatterns(
         const imagePromises = thumbnailUrls.slice(0, 5).map(async (url) => {
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
                 const res = await fetch(url, { signal: controller.signal });
                 clearTimeout(timeoutId);
 
@@ -100,86 +86,57 @@ export async function analyzePatterns(
                 return { mimeType, data: base64 };
             } catch (e) {
                 console.error("Image fetch failed:", url);
-                logs.push(`[System] Image fetch error for ${url.slice(0, 30)}...`);
                 return null;
             }
         });
 
         const images = (await Promise.all(imagePromises)).filter(Boolean) as { mimeType: string; data: string }[];
+        const useMultimodalAnalysis = images.length > 0;
 
-        // Stage 1: Individual Analysis (Visual + Text)
-        // If images available, use Multimodal (Nanobanana Pro aka Gemini 1.5 Pro)
-        const useMultimodal = images.length > 0;
+        // ===== Stage 1: Individual Analysis =====
+        const stage1Prompt = useMultimodalAnalysis
+            ? `【第1段階：個別画像の精緻分析】
 
-        const stage1Prompt = useMultimodal
-            ? `【第1段階：個別画像の視覚的分析 (Gemini 1.5 Pro Vision)】
-
-${images.length}枚のYouTubeサムネイル画像を視覚的に詳細分析し、以下のJSON形式で出力してください。
-
-【分析の重点: テロップの「フォント再現性」と「テンション感」】
-1. テロップのデザイン（フォントの種類、太さ、縁取り、装飾）を、デザイナーが再現できるレベルで詳細に記述してください。
-2. そのテロップの内容がどういう意図か（質問、煽り、事実提示など）を分析してください。
-3. 画像全体から伝わる「テンション感」（例：ハイテンション、シリアス、ほのぼの）を言語化してください。
-
-以下のJSON形式で回答:
-{
-  "individualAnalysis": [
-    {
-      "imageIndex": 1,
-      "title": "動画タイトル",
-      "text": {
-        "content": "テロップ内容",
-        "position": "配置（例：画面上部80%を占有）",
-        "scale": "文字サイズ（例：巨大、中、小）",
-        "style": "デザイン概要（例：金色の極太ゴシックに赤の境界線）",
-        "typography": {
-           "fontFamily": "フォント種別（例：極太ゴシック、明朝体、筆文字）",
-           "weight": "太さ（例：ExtraBold, Heavy）",
-           "effects": "装飾（例：二重縁取り、ドロップシャドウ、光彩、立体処理）",
-           "colors": "文字色と縁取り色の組み合わせ（例：文字は白、内枠は赤、外枠は黒）"
-        },
-        "meaning": "内容の意図"
-      },
-      "person": {
-        "hasPerson": true,
-        "position": "配置",
-        "expression": "表情",
-        "relationToText": "テロップとの関係"
-      },
-      "vibe": {
-        "mood": "テンション感",
-        "sentiment": "感情の方向性（positive/negative/neutral/shock）",
-        "colorScheme": "配色"
-      }
-    }
-  ]
-}`
-            : `【第1段階：個別画像の精緻分析 (テキストベース)】
-
-${thumbnailUrls.length}枚のYouTubeサムネイルを分析してください。
+${images.length}枚のYouTubeサムネイル画像を一枚ずつ詳細に分析してください。
 
 【動画タイトル参考】
 ${thumbnailTitles.map((t, i) => `画像${i + 1}: ${t}`).join('\n')}
 
 【分析項目 - 各画像について以下を抽出】
 
-1. テロップ/テキスト分析（詳細）
-   - フォントスタイル（ゴシック/明朝/手書き、太さ）
-   - 装飾（縁取り、影、立体感）
-   - 配色（文字色、枠色）
-   - 配置位置
+1. テロップ/テキスト分析
+   - テキストの有無（あえて文字無しかどうか）
+   - 文字数・フォントスタイル（太字/細字、角丸/シャープ）
+   - 配置位置（上部/中央/下部、左寄せ/中央/右寄せ）
+   - 文字サイズ比率（画面に対する割合）
+   - 文字色・縁取り・影の有無
+   - 複数行の場合のレイアウト
 
 2. 配色・感情分析
-   - 主要色（最大3色）
-   - 配色の意図
+   - 主要色（最大3色とその割合）
+   - 配色の意図（例：赤黒=危機感・ネガティブ、青白=信頼・清潔感）
+   - 明度・彩度の傾向
+   - グラデーションの有無と方向
 
 3. 構図・レイアウト
-   - 分割パターン
-   - 視線誘導
+   - 分割パターン（単一構図/2分割/3分割/対角線）
+   - 視線誘導の仕掛け（矢印、指差し、目線の方向）
+   - 余白の使い方
+   - 対比構造（Before/After、○×比較など）
 
 4. 人物・オブジェクト
-   - 人物の有無と表情
-   - ポーズ・配置位置
+   - 人物の有無と人数
+   - 表情（驚き/怒り/喜び/真剣など）
+   - ポーズ・ジェスチャー
+   - 配置位置（左/中央/右、顔の向き）
+   - 切り抜きか背景込みか
+
+5. 視覚効果
+   - 吹き出し・フレーム・枠
+   - 矢印（方向、意味：転換/強調/比較）
+   - アイコン・絵文字
+   - 光彩・ぼかし・モザイク
+   - 数字・記号の強調
 
 以下のJSON形式で回答:
 {
@@ -189,44 +146,64 @@ ${thumbnailTitles.map((t, i) => `画像${i + 1}: ${t}`).join('\n')}
       "title": "動画タイトル",
       "text": {
         "hasText": true,
-        "content": "テロップ内容",
+        "intentionallyNoText": false,
+        "content": "実際のテロップ内容",
+        "charCount": 5,
+        "fontStyle": "太字・角丸",
         "position": "中央上部",
-        "style": "極太ゴシック・赤縁取り",
-        "typography": {
-            "fontFamily": "ゴシック",
-            "effects": "赤縁取り"
-        }
+        "sizeRatio": "大（40%以上）",
+        "color": "#FFFFFF",
+        "outline": "黒縁取り3px",
+        "shadow": true
       },
       "color": {
         "primary": "#FF0000",
-        "mood": "危機感"
+        "secondary": "#000000",
+        "tertiary": "#FFFFFF",
+        "mood": "危機感・緊張",
+        "gradient": "なし"
       },
       "composition": {
-        "pattern": "中央集中型"
+        "pattern": "中央集中型",
+        "divisionType": "単一",
+        "eyeGuidance": "人物の視線が右上を向く",
+        "whitespace": "少ない",
+        "contrast": "なし"
       },
       "person": {
         "hasPerson": true,
-        "expression": "驚き"
+        "count": 1,
+        "expression": "驚き・目を見開く",
+        "gesture": "口を手で覆う",
+        "position": "中央やや左",
+        "isCutout": true
+      },
+      "effects": {
+        "arrows": ["右向き矢印（変化を示す）"],
+        "frames": "赤い枠線",
+        "icons": ["×マーク"],
+        "highlights": "集中線",
+        "numbers": "なし"
       }
     }
   ]
-}`;
+}
 
-        logs.push(`[Stage 1] Prompt Generated:\n${stage1Prompt.slice(0, 200)}...`);
+※各画像について漏れなく分析
+※推測ではなく実際に見える要素のみを記述`
+            : `【第1段階：個別画像の精緻分析 (テキストベース)】
+(画像取得に失敗したため、タイトルから推測可能な範囲で分析をお願いします。出力形式は上記JSONに従ってください。)
+${thumbnailTitles.map((t, i) => `画像${i + 1}: ${t}`).join('\n')}`;
 
+        logs.push(`[Stage 1] Analyzing...`);
         let stage1Response;
-        if (useMultimodal) {
-            // Import generateMultimodal dynamically or assume it's available via updated import
-            const { generateMultimodal } = await import("@/lib/gemini");
+        if (useMultimodalAnalysis) {
             stage1Response = await generateMultimodal(stage1Prompt, images);
-            logs.push(`[Stage 1] Multimodal Analysis Completed.`);
         } else {
             stage1Response = await generateText(stage1Prompt, 0.5);
-            logs.push(`[Stage 1] Text Analysis Completed.`);
         }
 
         let individualAnalysis: any[] = [];
-
         try {
             const cleanJson = stage1Response.replace(/```json/g, "").replace(/```/g, "").trim();
             const match = cleanJson.match(/\{[\s\S]*\}/);
@@ -236,86 +213,94 @@ ${thumbnailTitles.map((t, i) => `画像${i + 1}: ${t}`).join('\n')}
                 logs.push(`[Stage 1] Extracted ${individualAnalysis.length} analysis items.`);
             }
         } catch (e) {
-            console.warn("Stage 1 parsing failed, proceeding with empty analysis.");
-            logs.push(`[Stage 1 Error] JSON Parsing failed: ${e}`);
+            console.warn("Stage 1 parsing failed.", e);
         }
 
-        // Stage 2: Pattern Extraction
-        const stage2Prompt = `【第2段階：高度なパターン抽出と構造化分類】
+        // ===== Stage 2: Pattern Extraction =====
+        const stage2Prompt = `【第2段階：パターン抽出と分類】
 
 以下は${thumbnailUrls.length}枚のサムネイル画像の個別分析結果です。
-これらを分析し、**「共通点（構図・感情・文字配置）」を持つ画像をグループ化**し、最も有力な「2〜3個のパターン」を抽出してください。
+これらを分析し、共通するパターンを2〜4種類に分類してください。
 
 【個別分析データ】
 ${JSON.stringify(individualAnalysis, null, 2)}
 
-【必須要件（分類ロジック）】
-1. **グルーピング基準**: 以下の要素が似ているものを同じパターンとして扱ってください。
-   - 「テロップの位置と大きさ」
-   - 「ポジティブ/ネガティブの感情（Sentiment）」
-   - 「人物の有無と配置」
-2. **パターン抽出数**: 2〜3個に厳選。
-3. **Typography (超重要)**: フォント指示は詳細に記述。
+【パターン抽出ルール】
+1. 複数の画像に共通する特徴を「パターン」として抽出
+2. 2枚以上で見られる特徴のみをパターンとして認定
+3. 以下の観点で共通点を探す：
+   - テロップの配色パターン（赤黒=ネガティブ、青系=信頼など）
+   - 構図パターン（Before/After対比、矢印による転換表現など）
+   - 感情表現パターン（驚き顔+大文字、真剣顔+シンプルなど）
+   - 意図的な無テキストパターン
+   - 数字強調パターン
 
 【出力形式】
 {
   "patterns": [
     {
-      "name": "パターン名（例：危機感訴求型、ハッピー報告型）",
+      "name": "パターン名（例：危機感訴求型、ビフォーアフター型）",
       "description": "30文字以内の特徴説明",
       "matchCount": 3,
-      "exampleImageIndices": [1, 3, 5],
+      "matchingImages": [1, 3, 5],
       "characteristics": {
-        "subjectType": "被写体の種類（real_person / illustration / character / none）",
-        "textPosition": "具体的な位置",
-        "textScale": "文字サイズ（巨大/中/小）",
-        "sentiment": "感情（positive/negative/neutral/shock）",
-        "textStyle": "詳細な文字デザイン指示",
-        "colorScheme": "配色とムード",
-        "colorMood": "詳細なテンション感",
-        "personPosition": "人物配置",
-        "personExpression": "表情",
-        "personAttributes": {
-          "ageGroup": "年代（例：20代前半、30代半ば、50代以上）",
-          "gender": "性別（例：男性、女性）",
-          "hairStyle": "髪型・色（例：黒髪短髪、茶髪ロング）",
-          "clothing": "服装（例：黒のパーカー、スーツ、白Tシャツ）",
-          "distinctiveFeatures": "特徴（例：眼鏡、ひげ、帽子）"
-        },
-        "layout": "構図",
-        "visualTechniques": "視線誘導、エフェクト"
-      },
-      "requiredMaterials": {
-        "background": "背景詳細",
-        "person": "人物詳細（上記の属性を含む）",
-        "props": ["小物"]
+        "textPosition": "具体的な位置・サイズ",
+        "textStyle": "フォント・色・効果の具体的指定",
+        "colorScheme": "具体的な色コードと配色意図",
+        "colorMood": "この配色が与える印象",
+        "personPosition": "人物配置の具体的指定",
+        "personExpression": "表情・ポーズの指定",
+        "layout": "構図パターンの具体的説明",
+        "visualTechniques": "矢印・枠・効果の具体的使用法",
+        "keyElement": "このパターンの最も重要な要素"
       },
       "designRules": [
-        "ルール1: 人物の視線は必ずテロップに向ける",
-        "ルール2: 背景は暗くし文字を蛍光色で目立たせる"
+        "ルール1: 具体的な再現指示",
+        "ルール2: 具体的な再現指示",
+        "ルール3: 具体的な再現指示"
       ]
     }
   ],
-  "summary": "全体の傾向まとめ"
-}`;
+  "summary": "全体の傾向まとめ（50文字以内）",
+  "uniqueFindings": [
+    "発見1: 共通して見られる独自の手法",
+    "発見2: チャンネル特有のスタイル"
+  ]
+}
 
-        logs.push(`[Stage 2] Starting Pattern Extraction.`);
+※必ず2〜4パターンに分類
+※各パターンには具体的な再現ルールを含める
+※matchCountが多いほど重要なパターン`;
+
+        logs.push(`[Stage 2] classifying patterns...`);
         const stage2Response = await generateText(stage2Prompt, 0.5);
-        logs.push(`[Stage 2] Response received.`);
 
         try {
             const cleanJson = stage2Response.replace(/```json/g, "").replace(/```/g, "").trim();
             const match = cleanJson.match(/\{[\s\S]*\}/);
             if (match) {
                 const parsed = JSON.parse(match[0]);
-                const patterns = Array.isArray(parsed.patterns) ? parsed.patterns : [];
-                const summary = parsed.summary || "分析完了";
+                const patterns = parsed.patterns || [];
+                // Compat map: ensure characteristics match expected types
+                const cleanPatterns = patterns.map((p: any) => ({
+                    ...p,
+                    characteristics: {
+                        ...p.characteristics,
+                        // Fallbacks if missing
+                        textPosition: p.characteristics.textPosition || "Center",
+                        colorScheme: p.characteristics.colorScheme || "Vibrant",
+                        personPosition: p.characteristics.personPosition || "Right",
+                        layout: p.characteristics.layout || "Standard",
+                    }
+                }));
 
+                // Embed individual analysis for debugging/reference
                 return {
                     data: {
-                        patterns,
-                        summary,
-                        individualAnalysis,
+                        patterns: cleanPatterns,
+                        summary: parsed.summary || "",
+                        uniqueFindings: parsed.uniqueFindings || [],
+                        individualAnalysis
                     },
                     logs,
                 };
@@ -325,15 +310,16 @@ ${JSON.stringify(individualAnalysis, null, 2)}
         }
 
         return { error: "パターン分析に失敗しました。", logs };
+
     } catch (e: any) {
         console.error("Analysis error:", e);
         return { error: e.message || "分析エラー", logs };
     }
 }
 
-// ========================================
-// 2. Generate Model Images for Each Pattern
-// ========================================
+// ------------------------------------------------------------------
+// 2. Generate Model Images
+// ------------------------------------------------------------------
 export async function generateModelImages(
     patterns: PatternCategory[],
     videoTitle: string,
@@ -348,378 +334,167 @@ export async function generateModelImages(
         return { error: "パターンがありません。", logs };
     }
 
-    // Ensure we have at least 3 patterns to generate 3 images
+    // Limit/Fill to 3 patterns
     let workingPatterns = [...patterns];
     if (workingPatterns.length < 3) {
         let i = 0;
         while (workingPatterns.length < 3) {
-            // Cycle through existing patterns to fill up to 3
             workingPatterns.push({ ...patterns[i % patterns.length], name: `${patterns[i % patterns.length].name} (Var ${Math.floor(workingPatterns.length / patterns.length) + 1})` });
             i++;
         }
     }
-    // Limit to 3 if more
     workingPatterns = workingPatterns.slice(0, 3);
 
     try {
-        const promises = workingPatterns.map(async (pattern, idx) => {
-            logs.push(`[Model Gen] Starting '${pattern.name}'...`);
+        const promises = workingPatterns.map(async (pattern) => {
+            logs.push(`[Model Gen] Processing '${pattern.name}'...`);
 
-            // Fetch reference images for this pattern based on exampleImageIndices
-            const exampleIndices = pattern.exampleImageIndices || [];
+            // Fetch references if available for this pattern (matchingImages indices could be used if we had consistent index mapping, 
+            // but for simplicity we'll just pick random 2 from input URLs as general reference or try to map if possible.
+            // The 2-stage analysis returns exampleImageIndices or matchingImages.
+            const indices = pattern.exampleImageIndices || (pattern as any).matchingImages || [];
             let referenceImages: { mimeType: string; data: string }[] = [];
 
-            if (thumbnailUrls && exampleIndices.length > 0) {
-                const refUrls = exampleIndices
-                    .map(idx => thumbnailUrls[idx - 1])
+            if (thumbnailUrls && indices.length > 0) {
+                const refUrls = indices
+                    .map((idx: number) => thumbnailUrls![idx - 1]) // 1-based index to 0-based
                     .filter(Boolean)
                     .slice(0, 2);
 
-                logs.push(`[Model Gen] Fetching ${refUrls.length} reference images for '${pattern.name}'...`);
+                if (refUrls.length > 0) {
+                    const fetchPromises = refUrls.map(async (url: string) => {
+                        try {
+                            const res = await fetch(url);
+                            if (!res.ok) return null;
+                            const buffer = await res.arrayBuffer();
+                            return {
+                                mimeType: res.headers.get('content-type') || 'image/jpeg',
+                                data: Buffer.from(buffer).toString('base64')
+                            };
+                        } catch { return null; }
+                    });
+                    referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
+                }
+            }
 
-                const fetchPromises = refUrls.map(async (url) => {
+            // Fallback: if no specific references found, use first 2 of provided URLs
+            if (referenceImages.length === 0 && thumbnailUrls && thumbnailUrls.length > 0) {
+                const refUrls = thumbnailUrls.slice(0, 2);
+                const fetchPromises = refUrls.map(async (url: string) => {
                     try {
-                        const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 5000);
-                        const res = await fetch(url, { signal: controller.signal });
-                        clearTimeout(timeoutId);
+                        const res = await fetch(url);
                         if (!res.ok) return null;
                         const buffer = await res.arrayBuffer();
-                        const base64 = Buffer.from(buffer).toString('base64');
-                        const mimeType = res.headers.get('content-type') || 'image/jpeg';
-                        return { mimeType, data: base64 };
+                        return {
+                            mimeType: res.headers.get('content-type') || 'image/jpeg',
+                            data: Buffer.from(buffer).toString('base64')
+                        };
                     } catch { return null; }
                 });
                 referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
             }
 
-            // MODEL IMAGE: Include text with font reproduction
-            const promptForImage = `Create a YouTube thumbnail image with text.
+            const prompt = `YouTubeサムネイルのモデル画像を生成。
 
-[TEXT - EXACT REPRODUCTION]
-- Text to render: "${text || videoTitle}"
-- Reproduce the EXACT font style from reference images
-- If reference uses Gothic (ゴシック): heavy sans-serif, blocky
-- If reference uses Mincho (明朝): sharp serif with contrast  
-- If reference uses Brush (筆文字): dynamic calligraphy
-- Copy text effects: outlines, shadows, gradients exactly from reference
-- Text position: ${pattern.characteristics.textPosition}
-- Font style: ${pattern.characteristics.textStyle}
+【動画情報】
+タイトル: ${videoTitle}
+${videoDescription ? `内容: ${videoDescription}` : ''}
 
-[EXACT VISUAL REPRODUCTION FROM REFERENCE]
-- Copy the EXACT visual style, colors, and composition from reference images
-- Match the lighting, shadows, and color grading precisely
+【このパターンの特徴: ${pattern.name}】
+${pattern.description}
+- テロップ配置: ${pattern.characteristics.textPosition}
+- 配色: ${pattern.characteristics.colorScheme}
+- 人物配置: ${pattern.characteristics.personPosition}
+- レイアウト: ${pattern.characteristics.layout}
+- 効果: ${pattern.characteristics.effects || ""}
 
-${pattern.characteristics.subjectType === 'real_person' ? `[PERSON - EXACT REPRODUCTION]
-- COPY the person from reference: same pose, same angle, same expression
-- Position: ${pattern.characteristics.personPosition}
-- Expression: ${pattern.characteristics.personExpression || 'engaging'}
-- Clothing: ${pattern.characteristics.personAttributes?.clothing || 'match reference'}
-- Hair: ${pattern.characteristics.personAttributes?.hairStyle || 'match reference'}
-- Age: ${pattern.characteristics.personAttributes?.ageGroup || 'match reference'}
-- IMPORTANT: Reproduce the EXACT person appearance from reference` :
-                    pattern.characteristics.subjectType === 'illustration' || pattern.characteristics.subjectType === 'character' ? `[CHARACTER/ILLUSTRATION - EXACT REPRODUCTION]
-- COPY the character/illustration EXACTLY from reference
-- Same art style (anime, flat, 3D, etc.)
-- Same pose, expression, colors
-- Same line weight and shading style
-- Position: ${pattern.characteristics.personPosition}` :
-                        `[GRAPHICS/ICONS - EXACT REPRODUCTION]
-- Reproduce all icons, stamps, badges from reference
-- Same colors, shapes, positions
-- Main element: ${pattern.characteristics.layout}`}
+【生成ルール】
+- アスペクト比: 16:9（1280x720）
+- 上記パターンの特徴を忠実に再現
+- テロップ: ${text ? `「${text}」という文字を配置（文字化けを防ぐため、正確な日本語で描画）` : '【重要】文字・テロップは一切入れない（No Text）。画像とデザインのみで構成する'}`;
 
-[LAYOUT]
-- Aspect ratio: 16:9 (1280x720)
-- Layout: ${pattern.characteristics.layout}
-- Color scheme: ${pattern.characteristics.colorScheme}
-${pattern.requiredMaterials ? `- Background: ${pattern.requiredMaterials.background}` : ''}
-${pattern.requiredMaterials?.props?.length ? `- Props/Icons: ${pattern.requiredMaterials.props.join(', ')}` : ''}
-
-[QUALITY]
-- 8K Ultra HD professional quality
-- Photorealistic for photos, clean vectors for illustrations
-- Vibrant, high-contrast colors
-
-[NEGATIVE - DO NOT]
-- NO garbled/broken Japanese text
-- NO distorted faces or hands
-- NO blurry elements
-- NO changing the person/character from reference
-- NO adding text other than "${text || videoTitle}"`;
-
-
-            logs.push(`[Model Gen] '${pattern.name}' - ${referenceImages.length} refs loaded`);
-
-            // Generate image using Gemini with reference if available
             let imageUrl: string;
             try {
                 if (referenceImages.length > 0) {
-                    const { generateImageWithReference } = await import("@/lib/gemini");
-                    try {
-                        imageUrl = await generateImageWithReference(promptForImage, referenceImages);
-                        logs.push(`[Model Gen] '${pattern.name}' - Image generated with reference.`);
-                    } catch (refError) {
-                        console.warn(`[Model Gen] Failed with reference for '${pattern.name}', falling back to text-only generation.`, refError);
-                        logs.push(`[Model Gen] '${pattern.name}' - Reference generation failed, falling back.`);
-                        imageUrl = await generateThumbnailImage(promptForImage);
-                    }
+                    imageUrl = await generateImageWithReference(prompt, referenceImages);
                 } else {
-                    imageUrl = await generateThumbnailImage(promptForImage);
-                    logs.push(`[Model Gen] '${pattern.name}' - Image generated without reference.`);
+                    imageUrl = await generateImage(prompt);
                 }
-            } catch (e) {
-                console.error(`Failed to generate image for pattern ${pattern.name}:`, e);
-                logs.push(`[Model Gen Error] Failed to generate image for '${pattern.name}': ${e}`);
-                return null;
+            } catch (e: any) {
+                console.warn(`Gen failed for ${pattern.name}, falling back...`, e);
+                // Simple fallback prompt
+                imageUrl = await generateImage(`YouTube thumbnail background, ${pattern.characteristics.colorScheme}, ${pattern.characteristics.layout}`);
             }
 
-            // Generate text suggestions for this pattern
-            const textSuggestionPrompt = `動画タイトル「${videoTitle}」のサムネイル（${pattern.name}パターン）用の文言を3つ提案。
+            // Generate suggestions (Materials & Text)
+            const suggestionPrompt = `動画タイトル「${videoTitle}」のサムネイル（${pattern.name}パターン）の必要素材と文言を提案してください。
 
-JSON形式で回答:
-{
-  "suggestedTexts": [
-    {"text": "文言例（2〜20文字）", "reason": "選定理由"}
-  ]
-}`;
+            必ず以下のJSON形式のみで回答してください（説明文は不要）:
+            {
+                "description": "このパターンの構造説明",
+                "requiredMaterials": [
+                    { "name": "素材名", "description": "用途説明", "priority": "high" },
+                    { "name": "素材名2", "description": "用途説明", "priority": "medium" }
+                ],
+                "suggestedTexts": [
+                    { "text": "文言例1（2〜6文字）", "reason": "選定理由" },
+                    { "text": "文言例2（2〜6文字）", "reason": "選定理由" }
+                ]
+            }
 
-            let suggestedTexts: { text: string; reason: string }[] = [];
+パターン: ${pattern.name}
+特徴: ${pattern.description}`;
+
+            let description = pattern.description;
+            let requiredMaterials: MaterialSuggestion[] = [];
+            let suggestedTexts: TextSuggestionItem[] = [];
+
             try {
-                const textResponse = await generateText(textSuggestionPrompt, 0.7);
-                const match = textResponse.match(/\{[\s\S]*\}/);
+                const suggestionRes = await generateText(suggestionPrompt, 0.7);
+                const match = suggestionRes.match(/\{[\s\S]*\}/);
                 if (match) {
                     const parsed = JSON.parse(match[0]);
+                    description = parsed.description || description;
+                    requiredMaterials = parsed.requiredMaterials || [];
                     suggestedTexts = parsed.suggestedTexts || [];
                 }
-                logs.push(`[Model Gen] '${pattern.name}' - Text suggestions generated.`);
             } catch (e) {
+                console.error("Suggestion error:", e);
                 suggestedTexts = [
                     { text: "衝撃", reason: "インパクト重視" },
-                    { text: "必見", reason: "注目を集める" },
+                    { text: "必見", reason: "注目を集める" }
                 ];
-                logs.push(`[Model Gen Error] '${pattern.name}' - Text suggestion generation failed: ${e}`);
             }
 
             return {
                 imageUrl,
                 patternName: pattern.name,
-                description: pattern.description,
-                suggestedTexts,
+                description,
+                requiredMaterials,
+                suggestedTexts
             };
         });
 
         const results = (await Promise.all(promises)).filter(Boolean) as ModelImageInfo[];
-
-        logs.push(`[Complete] Generated ${results.length} model images.`);
         return { data: results, logs };
     } catch (e: any) {
         console.error("Model generation error:", e);
-        logs.push(`[Model Gen Error] Overall model generation error: ${e.message || "Unknown error"}`);
         return { error: e.message || "モデル画像生成エラー", logs };
     }
 }
 
-// ========================================
-// 2.5 Generate SINGLE Model Image (for streaming API)
-// ========================================
-export async function generateSingleModelImage(
-    pattern: PatternCategory,
-    videoTitle: string,
-    videoDescription: string = "",
-    thumbnailUrls: string[] = [],
-    customText: string = ""
-): Promise<{ data?: ModelImageInfo; error?: string }> {
-    await requireRole("student");
-
-    try {
-        const exampleIndices = pattern.exampleImageIndices || [];
-        let referenceImages: { mimeType: string; data: string }[] = [];
-
-        if (thumbnailUrls && exampleIndices.length > 0) {
-            const refUrls = exampleIndices
-                .map(idx => thumbnailUrls[idx - 1])
-                .filter(Boolean)
-                .slice(0, 2);
-
-            const fetchPromises = refUrls.map(async (url) => {
-                try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 5000);
-                    const res = await fetch(url, { signal: controller.signal });
-                    clearTimeout(timeoutId);
-                    if (!res.ok) return null;
-                    const buffer = await res.arrayBuffer();
-                    const base64 = Buffer.from(buffer).toString('base64');
-                    const mimeType = res.headers.get('content-type') || 'image/jpeg';
-                    return { mimeType, data: base64 };
-                } catch { return null; }
-            });
-            referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
-        }
-
-        const textToRender = customText || videoTitle;
-        const promptForImage = `Create a YouTube thumbnail image with text.
-
-[TEXT - EXACT REPRODUCTION]
-- Text to render: "${textToRender}"
-- Reproduce the EXACT font style from reference images
-- If reference uses Gothic (ゴシック): heavy sans-serif, blocky
-- If reference uses Mincho (明朝): sharp serif with contrast
-- If reference uses Brush (筆文字): dynamic calligraphy
-- Copy text effects: outlines, shadows, gradients exactly from reference
-- Text position: ${pattern.characteristics.textPosition}
-- Font style: ${pattern.characteristics.textStyle}
-
-[EXACT VISUAL REPRODUCTION FROM REFERENCE]
-- Copy the EXACT visual style, colors, and composition from reference images
-
-${pattern.characteristics.subjectType === 'real_person' ? `[PERSON - EXACT REPRODUCTION]
-- COPY the person from reference: same pose, same angle, same expression
-- Position: ${pattern.characteristics.personPosition}
-- IMPORTANT: Reproduce the EXACT person appearance from reference` :
-                pattern.characteristics.subjectType === 'illustration' || pattern.characteristics.subjectType === 'character' ? `[CHARACTER/ILLUSTRATION - EXACT REPRODUCTION]
-- COPY the character/illustration EXACTLY from reference
-- Same art style, pose, expression, colors` :
-                    `[GRAPHICS/ICONS - EXACT REPRODUCTION]
-- Reproduce all icons, stamps, badges from reference`}
-
-[LAYOUT]
-- Aspect ratio: 16:9 (1280x720)
-- Layout: ${pattern.characteristics.layout}
-- Color scheme: ${pattern.characteristics.colorScheme}
-
-[QUALITY]
-- 8K Ultra HD professional quality
-- Vibrant, high-contrast colors
-
-[NEGATIVE - DO NOT]
-- NO garbled/broken Japanese text
-- NO distorted faces or hands
-- NO blurry elements`;
-
-        let imageUrl: string;
-        try {
-            if (referenceImages.length > 0) {
-                const { generateImageWithReference } = await import("@/lib/gemini");
-                imageUrl = await generateImageWithReference(promptForImage, referenceImages);
-            } else {
-                imageUrl = await generateThumbnailImage(promptForImage);
-            }
-        } catch (e) {
-            console.error(`Failed to generate image for pattern ${pattern.name}:`, e);
-            return {
-                data: {
-                    imageUrl: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4MCIgaGVpZ2h0PSI3MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzMzMyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjQ4IiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7nlJ/miJDjgqjjg6njg7w8L3RleHQ+PC9zdmc+",
-                    patternName: pattern.name,
-                    description: `${pattern.description} (生成失敗)`,
-                    suggestedTexts: [{ text: "衝撃", reason: "インパクト" }]
-                }
-            };
-        }
-
-        return {
-            data: {
-                imageUrl,
-                patternName: pattern.name,
-                description: pattern.description,
-                suggestedTexts: [{ text: videoTitle.slice(0, 6), reason: "タイトルから抽出" }]
-            }
-        };
-    } catch (e: any) {
-        console.error("Single model generation error:", e);
-        return { error: e.message || "モデル画像生成エラー" };
-    }
-}
-
-// ========================================
-// 3. Generate Thumbnail Image
-// ========================================
-export async function generateThumbnailImage(prompt: string): Promise<string> {
-    try {
-        // Use the new generateImage function which returns base64 data URL
-        const imageDataUrl = await generateImage(prompt);
-        return imageDataUrl;
-    } catch (e: any) {
-        console.error("Image generation error:", e);
-        // Return a gradient placeholder on error (base64 encoded simple gradient)
-        return "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4MCIgaGVpZ2h0PSI3MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojNjM2NmYxIi8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdHlsZT0ic3RvcC1jb2xvcjojYTg1NWY3Ii8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNnKSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSI0OCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5BSeWbvuWDj+eUn+aIkOWkseaVlzwvdGV4dD48L3N2Zz4=";
-    }
-}
-
-// ========================================
-// 4. Generate Final Thumbnails (Multiple)
-// ========================================
-// ========================================
-// 3.5 Generate Prompt for Final Thumbnail
-// ========================================
-export async function generateThumbnailPrompt(
-    text: string,
-    textStyle: string = "bold white with black outline",
-    colorScheme: string = "high contrast",
-    subjectType: string = "real_person"
-): Promise<{ data?: string; error?: string }> {
-    try {
-        await requireRole("student");
-
-        if (!text) return { error: "サムネイル文言がありません。" };
-
-        const prompt = `[TASK]: Add text overlay to the model image template.
-
-[MANDATORY TEXT - EXACT CHARACTERS]
-Render EXACTLY this text: "${text}"
-- Write ONLY these characters: "${text}"
-- DO NOT modify, paraphrase, or add to this text
-- DO NOT write any other text, labels, or watermarks
-- Use standard Japanese characters (no garbled/broken text)
-
-[TYPOGRAPHY - MATCH REFERENCE STYLE]
-- Font style: ${textStyle}
-- If "Gothic/ゴシック": heavy sans-serif, blocky
-- If "Mincho/明朝": sharp serif with contrast
-- If "Brush/筆文字": dynamic calligraphy
-- Apply effects from reference: outlines, shadows, gradients
-- Text must look professionally designed
-
-[PRESERVE FROM MODEL IMAGE]
-- Keep the EXACT same person/character (pose, expression, clothing)
-- Keep the EXACT same background and composition
-- Keep the EXACT same color scheme: ${colorScheme}
-- Keep all icons, stamps, badges in their original positions
-${subjectType === 'real_person' ? `- PERSON must match model exactly` : subjectType === 'illustration' || subjectType === 'character' ? `- CHARACTER/ILLUSTRATION must match model exactly` : `- GRAPHICS must match model exactly`}
-
-[SPECIFICATIONS]
-- Resolution: 1280x720 (16:9)
-- 8K professional quality
-- High contrast, vibrant colors
-
-[NEGATIVE - ABSOLUTELY DO NOT]
-- DO NOT write text other than "${text}"
-- DO NOT change the person/character appearance
-- DO NOT add new people or elements
-- DO NOT create garbled/broken Japanese text
-- DO NOT blur or distort any element
-
-CRITICAL: The ONLY text must be "${text}". Everything else stays identical to model.`;
-
-        return { data: prompt };
-    } catch (e: any) {
-        console.error("Generate Prompt Error:", e);
-        return { error: e.message || "プロンプト生成中にエラーが発生しました" };
-    }
-}
-
-// ========================================
-// 4. Generate Final Thumbnails (Multiple)
-// ========================================
+// ------------------------------------------------------------------
+// 3. Generate Final Thumbnails (Updated Logic)
+// ------------------------------------------------------------------
 export async function generateFinalThumbnails(
     modelImage: ModelImageInfo | null,
     text: string,
     videoTitle: string,
-    count: number = 3,
+    count: number = 1,
     patternData?: PatternCategory,
     referenceUrls?: string[],
-    customPrompt?: string // Add custom prompt support
+    customPrompt?: string,
+    preserveModelPerson: boolean = false
 ): Promise<{ data?: string[]; error?: string }> {
     await requireRole("student");
 
@@ -728,114 +503,164 @@ export async function generateFinalThumbnails(
     }
 
     try {
-        // Fetch reference images if provided
+        // Prepare reference images
         let referenceImages: { mimeType: string; data: string }[] = [];
+        const imageUrlsToFetch = [];
+
+        // If preserving model person, modelImage is the primary reference/edit target
+        if (preserveModelPerson && modelImage?.imageUrl) {
+            imageUrlsToFetch.push(modelImage.imageUrl);
+        }
+
+        // Add regular reference URLs if space allows (max 3 refs total usually safe)
         if (referenceUrls && referenceUrls.length > 0) {
-            const fetchPromises = referenceUrls.slice(0, 2).map(async (url) => {
+            imageUrlsToFetch.push(...referenceUrls.slice(0, 2));
+        }
+
+        // Check if we didn't add model image yet but we have one (for style ref even if not preserving)
+        if (!preserveModelPerson && modelImage?.imageUrl && imageUrlsToFetch.length < 3) {
+            imageUrlsToFetch.unshift(modelImage.imageUrl);
+        }
+
+        if (imageUrlsToFetch.length > 0) {
+            const fetchPromises = imageUrlsToFetch.map(async (url) => {
                 try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 5000);
-                    const res = await fetch(url, { signal: controller.signal });
-                    clearTimeout(timeoutId);
+                    const res = await fetch(url);
                     if (!res.ok) return null;
                     const buffer = await res.arrayBuffer();
-                    const base64 = Buffer.from(buffer).toString('base64');
-                    const mimeType = res.headers.get('content-type') || 'image/jpeg';
-                    return { mimeType, data: base64 };
+                    return {
+                        mimeType: res.headers.get('content-type') || 'image/jpeg',
+                        data: Buffer.from(buffer).toString('base64')
+                    };
                 } catch { return null; }
             });
             referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
         }
 
-        // Generate images in parallel
-        const promises = Array.from({ length: count }).map(async (_, i) => {
-            // Use custom prompt if provided, otherwise generate default variation prompt
-            let variationPrompt = customPrompt || "";
+        // Construct Prompt based on GitHub latest logic and User's strict requirements
+        const patternInfo = modelImage ? `【ベース画像（モデル）の詳細】
+            ${modelImage.description}
+・パターン名: ${modelImage.patternName} ` : '';
 
-            if (!variationPrompt) {
-                // Fallback to default generation logic if no custom prompt
-                const textStyle = patternData?.characteristics?.textStyle || "bold white with black outline";
-                const colorScheme = patternData?.characteristics?.colorScheme || "high contrast";
-                variationPrompt = `[TASK]: Add text overlay to the model image template.
+        const textInstruction = text.trim().length > 0
+            ? `【変更指示】
+        文言を「${text}」に変更して配置してください。
+        元の文字のデザイン（フォント、色、縁取り、立体感）を可能な限り完全に維持してください。`
+            : '【変更指示】\n文字内容は変更しないでください。';
 
-[MANDATORY TEXT - EXACT CHARACTERS]
-Render EXACTLY this text: "${text}"
-- Write ONLY these characters: "${text}"
-- DO NOT modify, paraphrase, or add to this text
-- DO NOT write any other text, labels, or watermarks
-- Use standard Japanese characters (no garbled/broken text)
+        // Strict preservation prompt
+        const prompt = preserveModelPerson
+            ? `[TASK]
+You are an expert image editor.Your goal is to REPRODUCE the provided Reference Image(Model Image) EXACTLY, while only applying the specific text changes requested below.
 
-[TYPOGRAPHY - MATCH REFERENCE STYLE]
-- Font style: ${textStyle}
-- If "Gothic/ゴシック": heavy sans-serif, blocky
-- If "Mincho/明朝": sharp serif with contrast
-- If "Brush/筆文字": dynamic calligraphy
-- Apply effects from reference: outlines, shadows, gradients
-- Text must look professionally designed
+[REFERENCE IMAGE DESCRIPTION]
+${patternInfo}
 
-[PRESERVE FROM MODEL IMAGE]
-- Keep the EXACT same person/character (pose, expression, clothing)
-- Keep the EXACT same background and composition
-- Keep the EXACT same color scheme: ${colorScheme}
-- Keep all icons, stamps, badges in their original positions
-${patternData?.characteristics?.subjectType === 'real_person' ? `- PERSON must match model exactly` : patternData?.characteristics?.subjectType === 'illustration' || patternData?.characteristics?.subjectType === 'character' ? `- CHARACTER/ILLUSTRATION must match model exactly` : `- GRAPHICS must match model exactly`}
+        [STRICT CONSTRAINTS - DO NOT VIOLATE]
+        1. ** CHARACTER & FACE **: You MUST PRESERVE the character / person in the image EXACTLY.Do NOT change their face, expression, hair, pose, or clothing.It must look identical to the reference.
+2. ** FONT & DESIGN **: Reproduce the exact font style, color, stroke, shadow, and 3D effects of the original text.Do NOT change the typography style unless explicitly asked.
+3. ** COMPOSITION **: Keep the exact same layout and background.
+4. ** NO UNWANTED CHANGES **: If no specific change is requested for an element, KEEP IT EXACTLY AS IS.
+5. ** REALISM **: Ensure the final image looks like a high - quality YouTube thumbnail, not a low - quality drawing.
 
-[SPECIFICATIONS]
-- Resolution: 1280x720 (16:9)
-- 8K professional quality
-- Masterpiece, Best Quality, Award-winning photography
-- Sharp focus, Highly detailed, Cinematic lighting
-- Vibrant, clean, high-contrast colors
-- Perfect composition, professional color grading
+            ${textInstruction}
 
-[NEGATIVE - ABSOLUTELY DO NOT]
-- DO NOT write text other than "${text}"
-- DO NOT change the person/character appearance
-- DO NOT add new people or elements
-- DO NOT create garbled/broken Japanese text
-- DO NOT distort faces/hands/eyes
-- DO NOT blur or distort any element
-- NO pixelation, jpeg artifacts, or low resolution
-- NO amateur, sketch, or unfinished look
+${customPrompt ? `[ADDITIONAL USER INSTRUCTIONS]\n${customPrompt}` : ''}
 
-[VARIATION ${i + 1}]
-${i === 0 ? 'Standard composition' : i === 1 ? 'Slightly more vibrant' : 'Alternative emphasis'}
+        IMPORTANT: If the user did not ask to change the face or background, you MUST output an image that looks visually identical to the reference regarding those elements.`
+            : `YouTubeサムネイルを生成。
 
-CRITICAL: The ONLY text must be "${text}". Everything else stays identical to model.`;
-            }
+${text ? `【サムネイル文言】${text}` : '【文言なし】'}
 
-            try {
-                if (referenceImages.length > 0) {
-                    const { generateImageWithReference } = await import("@/lib/gemini");
-                    try {
-                        // Attempt generation with reference
-                        return await generateImageWithReference(variationPrompt, referenceImages);
-                    } catch (refError) {
-                        // Fallback to text-only if reference fails (e.g. image too large, network error)
-                        console.warn(`[Final Gen] Variation ${i} failed with reference, retrying without ref.`, refError);
-                        return await generateThumbnailImage(variationPrompt);
-                    }
-                } else {
-                    return await generateThumbnailImage(variationPrompt);
-                }
-            } catch (e: any) {
-                console.error(`Generation failed for variation ${i}:`, e);
-                // Return placeholder or null on failure, but filter later
-                return null;
+${patternInfo}
+
+${patternData?.summary ? `【パターンサマリー】${patternData.summary}` : ''}
+
+【重要ルール】
+        - アスペクト比: 16: 9（1280x720）
+        - 選択パターンの構図・配置・デザインを忠実に再現
+            - 文字が見やすく、クリックしたくなるデザインにする
+
+${customPrompt ? `【追加指示】\n${customPrompt}` : ''} `;
+
+        // Generate
+        const promises = Array.from({ length: count }).map(async () => {
+            if (referenceImages.length > 0) {
+                // If preserving, we rely heavily on the reference image
+                return await generateImageWithReference(prompt, referenceImages);
+            } else {
+                return await generateImage(prompt);
             }
         });
 
         const results = await Promise.all(promises);
         const images = results.filter(Boolean) as string[];
 
-        if (images.length === 0) {
-            throw new Error("すべての画像生成に失敗しました。時間をおいて再度お試しください。");
-        }
+        if (images.length === 0) throw new Error("画像生成に失敗しました。");
 
         return { data: images };
     } catch (e: any) {
         console.error("Final generation error:", e);
         return { error: e.message || "最終生成エラー" };
     }
+
 }
 
+
+
+// ------------------------------------------------------------------
+// 4. Single Model Image Generation (Legacy/Streaming support)
+// ------------------------------------------------------------------
+export async function generateSingleModelImage(
+    patterns: PatternCategory, // Changed locally to match singular call, but if called with array, handle appropriately? 
+    // Wait, typical usage: generateSingleModelImage(pattern, ...)
+    videoTitle: string,
+    videoDescription: string = "",
+    thumbnailUrls: string[] = [],
+    customText: string = ""
+): Promise<{ data?: ModelImageInfo; error?: string }> {
+    // Adapter to use the new batch function for a single item
+    // Actually, let's keep it simple and just reuse logic.
+    // NOTE: The previous signature was (pattern, ...) but imported as (patterns, ...) in some contexts? 
+    // Let's stick to the signature requested by the UI. 
+    // Looking at previous file: export async function generateSingleModelImage(pattern: PatternCategory, ...)
+
+    // We will just implement it directly.
+    return { error: "Deprecated function called. Use generateModelImages." };
+}
+
+// Re-export this for UI compatibility if needed, but better to update UI to not use it if possible.
+// Or actually implement it:
+export async function generateSingleModelImageCompatible(
+    pattern: PatternCategory,
+    videoTitle: string,
+    videoDescription: string = "",
+    thumbnailUrls: string[] = [],
+    customText: string = ""
+): Promise<{ data?: ModelImageInfo; error?: string }> {
+    const res = await generateModelImages([pattern], videoTitle, videoDescription, thumbnailUrls);
+    if (res.data && res.data.length > 0) {
+        return { data: res.data[0] };
+    }
+    return { error: res.error || "Failed" };
+}
+
+// ------------------------------------------------------------------
+// 5. Generate Prompt (Legacy/Suggestion support)
+// ------------------------------------------------------------------
+export async function generateThumbnailPrompt(
+    text: string,
+    textStyle: string = "指定なし",
+    colorScheme: string = "指定なし",
+    subjectType: string = "指定なし"
+): Promise<{ data?: string; error?: string }> {
+    // Generate a user-friendly Japanese description for the refinement step
+    const description = `【生成設定（修正可能）】
+・文字スタイル: ${textStyle}
+・配色テーマ: ${colorScheme}
+・人物タイプ: ${subjectType}
+
+※ここに詳細な指示を追記できます（例：「もっと明るく」「背景を青に」など）`;
+
+    return { data: description };
+}

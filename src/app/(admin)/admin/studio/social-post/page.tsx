@@ -1,224 +1,428 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Copy, Twitter, Hash, RefreshCw } from "lucide-react";
+import { Loader2, Copy, Sparkles, ArrowRight, ArrowLeft, CheckCircle2, MessageSquare, Repeat } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import { analyzePostStructure, analyzeAccountTone, generateSocialPosts } from "@/app/actions/socialPost";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
-const PURPOSES = [
-    { value: "engagement", label: "エンゲージメント獲得" },
-    { value: "promotion", label: "宣伝・告知" },
-    { value: "thought-leadership", label: "思考リーダーシップ" },
-    { value: "personal", label: "日常・パーソナル" },
-];
-
-const TONES = [
-    { value: "casual", label: "カジュアル" },
-    { value: "professional", label: "プロフェッショナル" },
-    { value: "humorous", label: "ユーモア" },
-    { value: "inspirational", label: "インスピレーション" },
-];
-
-interface GeneratedPost {
-    platform: "x" | "threads";
-    content: string;
-    hashtags: string[];
-    charCount: number;
-}
+// Steps Enum
+const STEPS = {
+    REFERENCE: 1,
+    ANALYSIS: 2,
+    TONE: 3,
+    THEME: 4,
+    RESULT: 5
+};
 
 export default function SocialPostPage() {
-    const [topic, setTopic] = useState("");
-    const [purpose, setPurpose] = useState("engagement");
-    const [tone, setTone] = useState("casual");
+    const { toast } = useToast();
+    const [step, setStep] = useState(STEPS.REFERENCE);
+    const [isPending, startTransition] = useTransition();
+
+    // Data State
     const [platform, setPlatform] = useState<"x" | "threads">("x");
-    const [loading, setLoading] = useState(false);
-    const [posts, setPosts] = useState<GeneratedPost[]>([]);
+    const [referenceContent, setReferenceContent] = useState("");
 
-    const handleGenerate = async () => {
-        if (!topic.trim()) return;
-        setLoading(true);
+    // Analysis Result
+    const [structureData, setStructureData] = useState<any>(null);
 
-        try {
-            const selectedPurpose = PURPOSES.find(p => p.value === purpose);
-            const selectedTone = TONES.find(t => t.value === tone);
-            const charLimit = platform === "x" ? 280 : 500;
+    // Tone State
+    const [accountUrl, setAccountUrl] = useState("");
+    const [samplePostsText, setSamplePostsText] = useState("");
+    const [toneMethod, setToneMethod] = useState<"url" | "text">("text"); // Default to text for reliability
+    const [toneData, setToneData] = useState<any>(null);
 
-            const response = await fetch("/api/ai/generate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    type: "text",
-                    prompt: `${platform === "x" ? "X（旧Twitter）" : "Threads"}用の投稿を3パターン作成してください。
+    // Theme State
+    const [theme, setTheme] = useState("");
 
-トピック: ${topic}
-目的: ${selectedPurpose?.label}
-トーン: ${selectedTone?.label}
-文字数制限: ${charLimit}文字以内
+    // Final Result
+    const [generatedPosts, setGeneratedPosts] = useState<any[]>([]);
 
-以下のJSON形式で出力してください（コードブロックなし）:
-[
-  {"content": "投稿本文1", "hashtags": ["ハッシュタグ1", "ハッシュタグ2"]},
-  {"content": "投稿本文2", "hashtags": ["ハッシュタグ1", "ハッシュタグ2"]},
-  {"content": "投稿本文3", "hashtags": ["ハッシュタグ1", "ハッシュタグ2"]}
-]
+    // Handlers
+    const handleAnalyzeStructure = () => {
+        if (!referenceContent.trim()) {
+            toast({ title: "エラー", description: "参考投稿を入力してください", variant: "destructive" });
+            return;
+        }
 
-※絵文字を適度に使用
-※エンゲージメントを意識した文章
-※ハッシュタグは3つまで`,
-                    system: "あなたはSNSマーケティングのプロです。"
-                })
-            });
-
-            const data = await response.json();
-            if (data.success && data.data) {
-                try {
-                    const jsonMatch = data.data.match(/\[[\s\S]*\]/);
-                    if (jsonMatch) {
-                        const parsed = JSON.parse(jsonMatch[0]);
-                        const generatedPosts: GeneratedPost[] = parsed.map((p: { content: string; hashtags: string[] }) => ({
-                            platform,
-                            content: p.content,
-                            hashtags: p.hashtags || [],
-                            charCount: p.content.length,
-                        }));
-                        setPosts(generatedPosts);
-                    }
-                } catch {
-                    // Fallback: treat as single post
-                    setPosts([{
-                        platform,
-                        content: data.data,
-                        hashtags: [],
-                        charCount: data.data.length,
-                    }]);
-                }
+        startTransition(async () => {
+            const result = await analyzePostStructure(referenceContent, platform);
+            if (result.success && result.data) {
+                setStructureData(result.data);
+                setStep(STEPS.ANALYSIS);
+                toast({ title: "分析完了", description: "投稿の構造化に成功しました" });
+            } else {
+                toast({ title: "エラー", description: result.error || "分析に失敗しました", variant: "destructive" });
             }
-        } catch (error) {
-            console.error("Generation error:", error);
-        } finally {
-            setLoading(false);
+        });
+    };
+
+    const handleAnalyzeTone = () => {
+        const textToAnalyze = toneMethod === "text" ? samplePostsText : "";
+        // Note: URL Fetching logic needs a server-side scraper. 
+        // If toneMethod is URL, we assume we might implement fetching later, 
+        // but for now let's rely on text or mock fetch if URL provided (or ask user to paste).
+        // Since we don't have a reliable X scraper, we strongly encourage Text Paste.
+
+        if (toneMethod === "text" && !textToAnalyze.trim()) {
+            toast({ title: "エラー", description: "過去の投稿テキストを入力してください", variant: "destructive" });
+            return;
+        }
+
+        // Simulating URL fetch failure or using text
+        let samples: string[] = [];
+        if (toneMethod === "text") {
+            samples = [textToAnalyze];
+        } else {
+            // TODO: Implement URL fetching via Tavily or similar in server action
+            toast({ title: "未実装", description: "URLからの自動取得は現在調整中です。テキスト入力を利用してください。", variant: "warning" });
+            return;
+        }
+
+        startTransition(async () => {
+            const result = await analyzeAccountTone(samples);
+            if (result.success && result.data) {
+                setToneData(result.data);
+                setStep(STEPS.THEME);
+                toast({ title: "トーン分析完了", description: "アカウントのトーンを抽出しました" });
+            } else {
+                toast({ title: "エラー", description: result.error || "トーン分析に失敗しました", variant: "destructive" });
+            }
+        });
+    };
+
+    const handleGenerate = () => {
+        if (!theme.trim()) {
+            toast({ title: "エラー", description: "テーマを入力してください", variant: "destructive" });
+            return;
+        }
+
+        startTransition(async () => {
+            const result = await generateSocialPosts(structureData, toneData, theme, platform);
+            if (result.success && result.data) {
+                setGeneratedPosts(result.data);
+                setStep(STEPS.RESULT);
+                toast({ title: "生成完了", description: "3パターンの投稿を作成しました" });
+            } else {
+                toast({ title: "エラー", description: result.error || "生成に失敗しました", variant: "destructive" });
+            }
+        });
+    };
+
+    const copyToClipboard = (text: string) => {
+        navigator.clipboard.writeText(text);
+        toast({ title: "コピーしました", duration: 1500 });
+    };
+
+    const resetFlow = () => {
+        if (confirm("入力内容をリセットして最初に戻りますか？")) {
+            setStep(STEPS.REFERENCE);
+            setReferenceContent("");
+            setStructureData(null);
+            setToneData(null);
+            setTheme("");
+            setGeneratedPosts([]);
         }
     };
 
-    const handleCopy = (content: string, hashtags: string[]) => {
-        const fullContent = content + (hashtags.length > 0 ? "\n\n" + hashtags.map(h => `#${h}`).join(" ") : "");
-        navigator.clipboard.writeText(fullContent);
-    };
-
     return (
-        <div className="max-w-4xl mx-auto space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold flex items-center gap-2">
-                    <Twitter className="h-6 w-6 text-primary" />
-                    X・Threads投稿作成
-                </h1>
-                <p className="text-muted-foreground">バズるSNS投稿をAIで作成</p>
+        <div className="max-w-4xl mx-auto space-y-8 pb-20">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-3xl font-bold flex items-center gap-2">
+                        {platform === "x" ? <Repeat className="w-8 h-8" /> : <div className="w-8 h-8 rounded-full border-2 border-current flex items-center justify-center font-serif italic font-bold">@</div>}
+                        X・Threads投稿作成ツール
+                    </h1>
+                    <p className="text-muted-foreground mt-2">
+                        バズポストの構造を分解・再構築するプロフェッショナルツール
+                    </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={resetFlow} className="gap-2">
+                    <RefreshCw className="w-4 h-4" />
+                    リセット
+                </Button>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-                <Card>
-                    <CardHeader>
-                        <CardTitle>設定</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="space-y-2">
-                            <Label>投稿のトピック *</Label>
-                            <Textarea
-                                value={topic}
-                                onChange={(e) => setTopic(e.target.value)}
-                                placeholder="例: 新しいブログ記事を公開しました。React入門ガイドについて..."
-                                rows={3}
-                            />
+            {/* Progress Steps */}
+            <div className="flex items-center justify-between mb-8 px-4 relative">
+                <div className="absolute left-0 top-1/2 w-full h-0.5 bg-muted -z-10" />
+                {[
+                    { s: STEPS.REFERENCE, label: "参考投稿" },
+                    { s: STEPS.ANALYSIS, label: "構造分析" },
+                    { s: STEPS.TONE, label: "トーン" },
+                    { s: STEPS.THEME, label: "テーマ" },
+                    { s: STEPS.RESULT, label: "生成結果" }
+                ].map((item) => (
+                    <div key={item.s} className={`flex flex-col items-center gap-2 bg-background px-2 ${step >= item.s ? "text-primary" : "text-muted-foreground"}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${step >= item.s ? "border-primary bg-primary text-primary-foreground" : "border-muted"
+                            }`}>
+                            {step > item.s ? <CheckCircle2 className="w-5 h-5" /> : item.s}
                         </div>
+                        <span className="text-xs font-semibold">{item.label}</span>
+                    </div>
+                ))}
+            </div>
 
-                        <Tabs value={platform} onValueChange={(v) => setPlatform(v as "x" | "threads")}>
+            {/* STEP 1: REFERENCE */}
+            {step === STEPS.REFERENCE && (
+                <Card className="animate-in fade-in slide-in-from-bottom-4">
+                    <CardHeader>
+                        <CardTitle>STEP 1: 参考投稿の入力</CardTitle>
+                        <CardDescription>
+                            それでは、参考にしたいバズポストを入力してください。
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="space-y-4">
+                            <div className="flex gap-4">
+                                <Button
+                                    variant={platform === "x" ? "default" : "outline"}
+                                    onClick={() => setPlatform("x")}
+                                    className="flex-1"
+                                >
+                                    X (旧Twitter)
+                                </Button>
+                                <Button
+                                    variant={platform === "threads" ? "default" : "outline"}
+                                    onClick={() => setPlatform("threads")}
+                                    className="flex-1"
+                                >
+                                    Threads
+                                </Button>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>参考にする投稿の文章</Label>
+                                <Textarea
+                                    placeholder="ここにバズった投稿のテキストを貼り付けてください..."
+                                    className="min-h-[200px]"
+                                    value={referenceContent}
+                                    onChange={(e) => setReferenceContent(e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground text-right">{referenceContent.length}文字</p>
+                            </div>
+                        </div>
+                    </CardContent>
+                    <CardFooter>
+                        <Button className="w-full" onClick={handleAnalyzeStructure} disabled={isPending || !referenceContent.trim()}>
+                            {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                            構造を分析する
+                        </Button>
+                    </CardFooter>
+                </Card>
+            )}
+
+            {/* STEP 2: ANALYSIS RESULT */}
+            {step === STEPS.ANALYSIS && structureData && (
+                <Card className="animate-in fade-in slide-in-from-bottom-4">
+                    <CardHeader>
+                        <CardTitle>STEP 2: 構造分析結果</CardTitle>
+                        <CardDescription>参考投稿を以下のように分解・テンプレート化しました。</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="grid gap-6 md:grid-cols-2">
+                            <div className="space-y-4">
+                                <div className="bg-muted p-4 rounded-lg space-y-2">
+                                    <Label className="text-primary font-bold">投稿タイプ</Label>
+                                    <p className="text-lg font-semibold">{structureData.postType}</p>
+                                </div>
+                                <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+                                    <Label className="font-semibold">抽象化・構造 (STEP 1)</Label>
+                                    <div className="prose prose-sm max-w-none">
+                                        <MarkdownRenderer content={structureData.step1_abstraction || structureData.analysisSummary || ""} />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <div className="border-2 border-primary/20 p-4 rounded-lg bg-primary/5 space-y-3">
+                                    <Label className="font-bold text-primary flex items-center gap-2">
+                                        <Sparkles className="w-4 h-4" />
+                                        抽出されたテンプレート (STEP 3)
+                                    </Label>
+                                    <div className="text-sm font-medium whitespace-pre-wrap leading-relaxed">
+                                        {structureData.step3_template || (structureData.simplifiedStructure?.join("\n↓\n"))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </CardContent>
+                    <CardFooter className="flex justify-between">
+                        <Button variant="ghost" onClick={() => setStep(STEPS.REFERENCE)}>戻る</Button>
+                        <Button onClick={() => setStep(STEPS.TONE)}>
+                            次へ（トーン分析）
+                            <ArrowRight className="w-4 h-4 ml-2" />
+                        </Button>
+                    </CardFooter>
+                </Card>
+            )}
+
+            {/* STEP 3: TONE ANALYSIS */}
+            {step === STEPS.TONE && (
+                <Card className="animate-in fade-in slide-in-from-bottom-4">
+                    <CardHeader>
+                        <CardTitle>STEP 3: アカウントトーン分析</CardTitle>
+                        <CardDescription>
+                            あなたの過去の投稿から、文体や雰囲気を学習します。
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <Tabs value={toneMethod} onValueChange={(v) => setToneMethod(v as "url" | "text")}>
                             <TabsList className="w-full">
-                                <TabsTrigger value="x" className="flex-1">X（280文字）</TabsTrigger>
-                                <TabsTrigger value="threads" className="flex-1">Threads（500文字）</TabsTrigger>
+                                <TabsTrigger value="text" className="flex-1">テキスト貼り付け（推奨）</TabsTrigger>
+                                <TabsTrigger value="url" className="flex-1">アカウントURL（β版）</TabsTrigger>
                             </TabsList>
+
+                            <TabsContent value="text" className="space-y-4 mt-4">
+                                <div className="space-y-2">
+                                    <Label>過去の投稿サンプル</Label>
+                                    <Textarea
+                                        placeholder="あなたの過去の投稿をいくつかコピーして貼り付けてください（詳しいほど精度が上がります）..."
+                                        className="min-h-[200px]"
+                                        value={samplePostsText}
+                                        onChange={(e) => setSamplePostsText(e.target.value)}
+                                    />
+                                    <p className="text-xs text-muted-foreground">※ 3〜5投稿程度を含めることをお勧めします</p>
+                                </div>
+                            </TabsContent>
+
+                            <TabsContent value="url" className="space-y-4 mt-4">
+                                <div className="space-y-2">
+                                    <Label>アカウントURL</Label>
+                                    <Input
+                                        placeholder="https://twitter.com/username"
+                                        value={accountUrl}
+                                        onChange={(e) => setAccountUrl(e.target.value)}
+                                    />
+                                    <p className="text-xs text-destructive">※ 現在、URLからの自動取得は不安定な場合があります。テキスト貼り付けを推奨します。</p>
+                                </div>
+                            </TabsContent>
                         </Tabs>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>目的</Label>
-                                <Select value={purpose} onValueChange={setPurpose}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        {PURPOSES.map(p => (
-                                            <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>トーン</Label>
-                                <Select value={tone} onValueChange={setTone}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        {TONES.map(t => (
-                                            <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-
-                        <Button className="w-full" onClick={handleGenerate} disabled={loading || !topic.trim()}>
-                            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            {loading ? "生成中..." : "投稿を生成（3パターン）"}
-                        </Button>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle>生成結果</CardTitle>
-                        <CardDescription>クリックでコピー</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        {posts.length > 0 ? (
-                            posts.map((post, i) => (
-                                <div
-                                    key={i}
-                                    className="p-4 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
-                                    onClick={() => handleCopy(post.content, post.hashtags)}
-                                >
-                                    <div className="flex items-center justify-between mb-2">
-                                        <Badge variant="secondary">パターン {i + 1}</Badge>
-                                        <span className={`text-xs ${post.charCount > (platform === "x" ? 280 : 500) ? "text-destructive" : "text-muted-foreground"}`}>
-                                            {post.charCount}文字
-                                        </span>
-                                    </div>
-                                    <p className="text-sm whitespace-pre-wrap mb-2">{post.content}</p>
-                                    {post.hashtags.length > 0 && (
-                                        <div className="flex flex-wrap gap-1">
-                                            {post.hashtags.map((tag, j) => (
-                                                <Badge key={j} variant="outline" className="text-xs">
-                                                    <Hash className="h-3 w-3 mr-1" />
-                                                    {tag}
-                                                </Badge>
-                                            ))}
-                                        </div>
-                                    )}
+                        {toneData && (
+                            <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg animate-in fade-in">
+                                <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-bold mb-2">
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    分析完了
                                 </div>
-                            ))
-                        ) : (
-                            <div className="h-[300px] flex items-center justify-center text-muted-foreground border-2 border-dashed rounded-md">
-                                <div className="text-center">
-                                    <Twitter className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                                    <p>投稿案がここに表示されます</p>
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <span className="font-semibold block text-muted-foreground">トーンタイプ</span>
+                                        {toneData.toneType}
+                                    </div>
+                                    <div>
+                                        <span className="font-semibold block text-muted-foreground">一人称</span>
+                                        {toneData.firstPerson}
+                                    </div>
+                                    <div className="col-span-2">
+                                        <span className="font-semibold block text-muted-foreground">特徴</span>
+                                        {toneData.description}
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </CardContent>
+                    <CardFooter className="flex justify-between">
+                        <Button variant="ghost" onClick={() => setStep(STEPS.ANALYSIS)}>戻る</Button>
+                        {!toneData ? (
+                            <Button onClick={handleAnalyzeTone} disabled={isPending}>
+                                {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                                トーンを分析する
+                            </Button>
+                        ) : (
+                            <Button onClick={() => setStep(STEPS.THEME)}>
+                                次へ（テーマ決定）
+                                <ArrowRight className="w-4 h-4 ml-2" />
+                            </Button>
+                        )}
+                    </CardFooter>
                 </Card>
-            </div>
+            )}
+
+            {/* STEP 4: THEME */}
+            {step === STEPS.THEME && (
+                <Card className="animate-in fade-in slide-in-from-bottom-4">
+                    <CardHeader>
+                        <CardTitle>STEP 4: 作成テーマの入力</CardTitle>
+                        <CardDescription>
+                            それではテンプレートを使ってオリジナルポストを作成します。テーマやジャンルなどを教えてください。
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>どんなテーマで投稿を作りたいですか？</Label>
+                            <Textarea
+                                placeholder="例：リモートワークでの失敗談、新人時代の学び、最近買ってよかったもの..."
+                                className="min-h-[120px] text-lg"
+                                value={theme}
+                                onChange={(e) => setTheme(e.target.value)}
+                            />
+                        </div>
+                    </CardContent>
+                    <CardFooter className="flex justify-between">
+                        <Button variant="ghost" onClick={() => setStep(STEPS.TONE)}>戻る</Button>
+                        <Button onClick={handleGenerate} disabled={isPending || !theme.trim()} size="lg" className="w-full md:w-auto">
+                            {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                            投稿を生成する (3パターン)
+                        </Button>
+                    </CardFooter>
+                </Card>
+            )}
+
+            {/* STEP 5: RESULT */}
+            {step === STEPS.RESULT && generatedPosts.length > 0 && (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-2xl font-bold">生成結果 (STEP 5)</h2>
+                        <Button variant="outline" onClick={() => setStep(STEPS.THEME)}>テーマを変えて再生成</Button>
+                    </div>
+
+                    <div className="grid gap-6 md:grid-cols-3">
+                        {generatedPosts.map((post, i) => (
+                            <Card key={i} className="flex flex-col h-full hover:border-primary/50 transition-colors">
+                                <CardHeader className="pb-3">
+                                    <Badge className="w-fit mb-2">{post.type || `パターン ${i + 1}`}</Badge>
+                                    <CardDescription className="text-xs">{post.explanation}</CardDescription>
+                                </CardHeader>
+                                <CardContent className="flex-1">
+                                    <div className="bg-muted/30 p-4 rounded-lg whitespace-pre-wrap font-sans text-sm leading-relaxed border min-h-[200px]">
+                                        {post.content}
+                                    </div>
+                                    <div className="mt-2 text-right text-xs text-muted-foreground">
+                                        {post.content.length}文字
+                                    </div>
+                                </CardContent>
+                                <CardFooter>
+                                    <Button variant="secondary" className="w-full" onClick={() => copyToClipboard(post.content)}>
+                                        <Copy className="w-4 h-4 mr-2" />
+                                        コピー
+                                    </Button>
+                                </CardFooter>
+                            </Card>
+                        ))}
+                    </div>
+
+                    <Card className="bg-muted/50 border-dashed">
+                        <CardHeader>
+                            <CardTitle className="text-lg">次のステップ</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <p className="text-sm text-muted-foreground">
+                                気に入ったパターンを選択して、必要に応じて微調整を行ってください。<br />
+                                別のテーマで作成したい場合は「テーマを変えて再生成」をクリックしてください。
+                            </p>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
         </div>
     );
 }

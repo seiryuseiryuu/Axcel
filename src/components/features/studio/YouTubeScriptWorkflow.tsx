@@ -19,11 +19,14 @@ import {
     analyzeViewers,
     analyzeVideo,
     generateImprovements,
+    regenerateStructure,
     writeScript,
     extractThumbnailText,
     analyzeChannelFromChannelUrl,
     analyzeChannelFromUrls // Keep for backward compatibility if needed, though we use the new one primarily
 } from "@/app/actions/scriptWorkflow";
+import { saveCreation } from "@/app/actions/history";
+import { RefinementArea } from "@/components/features/studio/RefinementArea";
 
 interface ChannelStyle {
     name: string;
@@ -80,6 +83,9 @@ interface WorkflowState {
     ctaContent: string; // 古い形式との互換性用
     improvements: { id: string; section: string; type: 'add' | 'remove'; content: string; reason: string; selected: boolean }[];
     improvementData: ImprovementData | null; // 新形式のデータ
+    userImprovementInput: string; // ユーザーからの自由記述改善案
+    // STEP 5.5: Revised Structure
+    revisedStructure: string;
     // STEP6
     finalScript: string;
 }
@@ -184,6 +190,8 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
         ctaContent: "",
         improvements: [],
         improvementData: null,
+        userImprovementInput: "",
+        revisedStructure: "",
         finalScript: "",
     });
 
@@ -414,26 +422,87 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
         });
     };
 
-    // STEP6: 台本作成
-    const runScriptWriting = () => {
+    // STEP 5.5: 構成の再生成（改善案の反映）
+    const runRegenerateStructure = () => {
         const selectedImprovements = workflow.improvements
             .filter(i => i.selected)
             .map(i => ({ type: i.type, content: i.content }));
 
+        // 新形式のデータがある場合も考慮（現在は旧形式互換でimprovements配列を作成している前提だが、
+        // improvementDataがある場合はそちらを利用する方法も検討。
+        // ここではシンプルに、improvementAxesのselected=trueのものも考慮するロジックが必要かもだが
+        // 現在のUIロジックではimprovementData.improvementAxesを直接操作しているので、
+        // テキスト化して渡す必要がある。
+
+        let improvementTextItems: { type: string; content: string }[] = [...selectedImprovements];
+
+        if (workflow.improvementData?.improvementAxes) {
+            workflow.improvementData.improvementAxes.forEach(axis => {
+                if (axis.selected) {
+                    improvementTextItems.push({
+                        type: 'add',
+                        content: `改善軸「${axis.axisName}」: ${axis.description}`
+                    });
+                }
+            });
+        }
+
+        startTransition(async () => {
+            const result = await regenerateStructure(
+                workflow.structureAnalysis,
+                improvementTextItems,
+                workflow.userImprovementInput
+            );
+
+            if (result.success && result.data) {
+                setWorkflow(prev => ({
+                    ...prev,
+                    revisedStructure: result.data!,
+                    step: 6 // Move to step 6 (now Script Writing is Step 6 but visualization should handle intermediate state or I should add a substep)
+                    // For simplicity, let's keep step 5 active or introduce a "Step 5.5" visual
+                    // Actually, let's put the revised structure into Step 6's "Pre-generation check" area 
+                    // OR overwrite structureAnalysis? No, keep original.
+                    // Let's set revisedStructure and maybe switch to a view where user confirms it before writing script.
+                }));
+                // We'll update step to 6, and Step 6 will show Revised Structure first, then "Write Script" button.
+                goToStep(6);
+                toast({ title: "構成案を更新しました", description: "内容を確認して台本作成に進んでください" });
+            } else {
+                onError(result.error || "構成の再生成に失敗しました");
+            }
+        });
+    }
+
+    // STEP6: 台本作成
+    const runScriptWriting = () => {
+        // revisedStructure があればそれを使用、なければ original structure
+        const targetStructure = workflow.revisedStructure || workflow.structureAnalysis;
+
         startTransition(async () => {
             const result = await writeScript(
-                workflow.structureAnalysis,
+                targetStructure,
                 workflow.viewerNeeds,
-                selectedImprovements,
+                [], // Improvements strictly applied in structure already
                 workflow.channelStyle, // Pass channel style for persona
                 workflow.referenceUrl,  // 元動画のURL
                 workflow.originalTranscript,  // 元動画の字幕（口調を踏襲するため）
-                workflow.improvementData // New: Pass structured improvement data
+                workflow.improvementData // Pass structured improvement data for CTA context
             );
 
             if (result.success && result.data) {
                 setWorkflow(prev => ({ ...prev, finalScript: result.data! }));
                 toast({ title: "台本作成完了！", description: "台本が完成しました" });
+
+                // Save to history
+                try {
+                    await saveCreation(
+                        `YouTube台本: ${workflow.referenceUrl?.slice(0, 30)}...`,
+                        'video_script',
+                        result.data!
+                    );
+                } catch (err) {
+                    console.error("Failed to save history:", err);
+                }
             } else {
                 onError(result.error || "台本作成に失敗しました");
             }
@@ -463,7 +532,7 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
             case 3: return !!workflow.viewerNeeds;
             case 4: return !!workflow.openingAnalysis;
             case 5: return workflow.improvements.length > 0 || workflow.improvementData !== null;
-            case 6: return !!workflow.finalScript;
+            case 6: return !!workflow.finalScript || !!workflow.revisedStructure;
             default: return false;
         }
     };
@@ -1052,6 +1121,62 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
                                             </Card>
                                         );
                                     })}
+
+                                    {/* ユーザー自由記述入力 */}
+                                    <div className="space-y-2 border rounded-lg p-4 bg-muted/10">
+                                        <Label className="flex items-center gap-2">
+                                            <Edit3 className="w-4 h-4" />
+                                            その他の改善指示（自由記述）
+                                        </Label>
+                                        <Textarea
+                                            placeholder="例：もっと初心者向けに噛み砕いて説明を追加してほしい、第2章は削除してほしい、など"
+                                            value={workflow.userImprovementInput}
+                                            onChange={(e) => setWorkflow(prev => ({ ...prev, userImprovementInput: e.target.value }))}
+                                            className="min-h-[100px]"
+                                        />
+                                    </div>
+
+                                    <Button onClick={runRegenerateStructure} disabled={isPending} className="w-full">
+                                        {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ArrowRight className="w-4 h-4 mr-2" />}
+                                        改善内容を反映して構成を再生成する
+                                    </Button>
+                                </div>
+                            )}
+
+                            {/* Legacy Improvements Fallback UI */}
+                            {workflow.improvements.length > 0 && !workflow.improvementData && (
+                                <div className="space-y-4">
+                                    {/* (Render legacy items if any) */}
+                                    {workflow.improvements.map(item => (
+                                        <div key={item.id} className="flex gap-2 p-3 border rounded">
+                                            <input
+                                                type="checkbox"
+                                                checked={item.selected}
+                                                onChange={() => toggleImprovement(item.id)}
+                                                className="mt-1"
+                                            />
+                                            <div>
+                                                <span className={`text-xs font-bold px-1.5 py-0.5 rounded mr-2 ${item.type === 'add' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>
+                                                    {item.type === 'add' ? '追加' : '削除'}
+                                                </span>
+                                                <span className="text-sm">{item.content}</span>
+                                                <p className="text-xs text-muted-foreground">{item.reason}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+
+                                    {/* ユーザー自由記述入力 (Legacy fallback) */}
+                                    <div className="space-y-2 mt-4">
+                                        <Label>その他の改善指示</Label>
+                                        <Textarea
+                                            value={workflow.userImprovementInput}
+                                            onChange={(e) => setWorkflow(prev => ({ ...prev, userImprovementInput: e.target.value }))}
+                                        />
+                                    </div>
+
+                                    <Button onClick={runRegenerateStructure} disabled={isPending} className="w-full mt-4">
+                                        改善内容を反映して構成を再生成する
+                                    </Button>
                                 </div>
                             )}
                         </div>
@@ -1059,19 +1184,47 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
 
                     {/* STEP 6: 台本作成 */}
                     {workflow.step === 6 && (
-                        <>
-                            <Button onClick={runScriptWriting} disabled={isPending} className="w-full" size="lg">
-                                {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                                台本を作成する
-                            </Button>
-                            {workflow.finalScript && (
-                                <ResultDisplay
-                                    content={workflow.finalScript}
-                                    onChange={(v) => setWorkflow(prev => ({ ...prev, finalScript: v }))}
-                                    label="完成台本"
-                                />
+                        <div className="space-y-6">
+                            {/* Revised Structure Confirmation */}
+                            {workflow.revisedStructure && (
+                                <div className="space-y-4">
+                                    <ResultDisplay
+                                        content={workflow.revisedStructure}
+                                        onChange={(v) => setWorkflow(prev => ({ ...prev, revisedStructure: v }))}
+                                        label="最終構成案（この構成で台本を作成します）"
+                                    />
+                                </div>
                             )}
-                        </>
+
+                            <Button onClick={runScriptWriting} disabled={isPending} className="w-full" size="lg">
+                                {isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileText className="w-4 h-4 mr-2" />}
+                                この構成で台本を作成する
+                            </Button>
+
+                            {workflow.finalScript && (
+                                <div className="space-y-4">
+                                    <ResultDisplay
+                                        content={workflow.finalScript}
+                                        onChange={(v) => setWorkflow(prev => ({ ...prev, finalScript: v }))}
+                                        label="完成した台本"
+                                    />
+
+                                    <RefinementArea
+                                        initialContent={workflow.finalScript}
+                                        contextData={{
+                                            structure: workflow.revisedStructure || workflow.structureAnalysis,
+                                            viewer: workflow.viewerNeeds,
+                                            opening: workflow.openingAnalysis,
+                                            improvement: workflow.improvementData || workflow.improvements,
+                                            channelUrl: workflow.channelUrl,
+                                            referenceUrl: workflow.referenceUrl
+                                        }}
+                                        onContentUpdate={(newContent) => setWorkflow(prev => ({ ...prev, finalScript: newContent }))}
+                                        contentType="script"
+                                    />
+                                </div>
+                            )}
+                        </div>
                     )}
                 </CardContent>
             </Card>

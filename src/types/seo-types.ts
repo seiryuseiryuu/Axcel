@@ -157,6 +157,9 @@ export interface SEOWorkflowState {
     authorTitle: string;
     authorProfile: string;
 
+    // Eye-catch settings
+    includeEyeCatch: boolean;
+
     // Internal Links Settings
     internalLinksUrl: string;
     internalLinks: InternalLink[];
@@ -186,6 +189,12 @@ export interface SEOWorkflowState {
 
     // Step 6 outputs
     generatedContent: GeneratedArticle | null;
+
+    // Regeneration instructions
+    regenerateStep2Instructions?: string;
+    regenerateStep3Instructions?: string;
+    regenerateStep4Instructions?: string;
+    regenerateStep5Instructions?: string;
 }
 
 // API Request Types
@@ -202,17 +211,20 @@ export interface SearchIntentRequest {
 export interface StructureAnalysisRequest {
     articleTitle: string;
     articleContent: string;
+    modificationInstructions?: string;
 }
 
 export interface ReaderAnalysisRequest {
     primaryKeyword: string;
     articleSummary: string;
     searchIntentAnalysis: SearchIntentAnalysis | null;
+    modificationInstructions?: string;
 }
 
 export interface ImprovementsRequest {
     readerAnalysis: ReaderAnalysis;
     structureAnalyses: ArticleStructureAnalysis[];
+    modificationInstructions?: string;
 }
 
 export interface OutlineRequest {
@@ -225,6 +237,7 @@ export interface OutlineRequest {
     improvements: ImprovementSuggestions;
     wordCountMin: number;
     wordCountMax: number;
+    modificationInstructions?: string;
 }
 
 export interface DraftRequest {
@@ -244,6 +257,7 @@ export interface DraftRequest {
     referenceArticles?: ReferenceArticle[];
     structureAnalyses?: ArticleStructureAnalysis[];
     internalLinks?: InternalLink[];  // 内部リンク（AIへの指示用）
+    includeEyeCatch?: boolean;  // アイキャッチ画像説明を挿入するか
 }
 
 // Search Intent Options
@@ -287,6 +301,8 @@ export const initialSEOState: SEOWorkflowState = {
     authorName: '',
     authorTitle: '',
     authorProfile: '',
+    // Eye-catch
+    includeEyeCatch: false,
     referenceArticles: [],
     searchIntentAnalysis: null,
     step1Confirmed: false,

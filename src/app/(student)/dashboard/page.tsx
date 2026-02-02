@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/rbac";
 import { DailyChecklist } from "@/components/features/student/DailyChecklist";
 import { PlanTask, generateDailyTasks } from "@/app/actions/planner";
 import { redirect } from "next/navigation";
-import { Bot } from "lucide-react";
+import { Bot, History } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default async function StudentDashboard() {
     await requireRole("student");
@@ -70,6 +72,12 @@ export default async function StudentDashboard() {
                     </div>
                 )}
             </div>
+            <Link href="/student/history">
+                <Button variant="outline" className="gap-2">
+                    <History className="w-4 h-4" />
+                    生成履歴
+                </Button>
+            </Link>
 
             {dailyPlan ? (
                 <DailyChecklist

@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateText } from "@/lib/gemini";
 import { ReaderAnalysisRequest, ReaderAnalysis } from "@/types/seo-types";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
 
 export async function POST(req: NextRequest) {
    try {
       const body: ReaderAnalysisRequest = await req.json();
       const { primaryKeyword, articleSummary, searchIntentAnalysis, modificationInstructions } = body;
-
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
       const prompt = `あなたはマーケティングの専門家です。
 以下のキーワードと参考記事から、想定読者を詳細に分析してください。
@@ -86,8 +82,8 @@ ${modificationInstructions ? `
   }
 }`;
 
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
+      // Use generateText with gemini-2.0-flash
+      const text = await generateText(prompt, 0.7, "gemini-2.0-flash");
 
       // Remove markdown code blocks if present
       let cleanedText = text.trim();

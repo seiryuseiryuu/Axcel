@@ -28,6 +28,7 @@ import {
     READER_LEVEL_OPTIONS,
     initialSEOState,
 } from "@/types/seo-types";
+import { RefinementArea } from "@/components/features/studio/RefinementArea";
 
 const STEPS = [
     { num: 1, label: "キーワード・参考記事", icon: Search },
@@ -1029,6 +1030,30 @@ export default function SEOGeneratorPage() {
                             </div>
                         </CardContent>
                     </Card>
+
+                    <RefinementArea
+                        initialContent={state.generatedContent.content}
+                        contextData={{
+                            primaryKeyword: state.primaryKeyword,
+                            secondaryKeywords: state.secondaryKeywords,
+                            structure: state.structureAnalyses,
+                            reader: state.readerAnalysis,
+                            outline: state.outline,
+                            improvements: state.improvements,
+                            tone: state.tone
+                        }}
+                        onContentUpdate={(newContent) => {
+                            if (state.generatedContent) {
+                                updateState({
+                                    generatedContent: {
+                                        ...state.generatedContent,
+                                        content: newContent
+                                    }
+                                });
+                            }
+                        }}
+                        contentType="article"
+                    />
                 </div>
             )}
         </div>

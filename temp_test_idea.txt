@@ -1,0 +1,8 @@
+// verify_refinement.js
+require('dotenv').config({ path: '.env.local' });
+const { refineContent } = require('./src/app/actions/refine'); // This won't work easily with ES modules/Next.js structure in plain node.
+
+// BETTER APPROACH: Create a Next.js API route that triggers the function for verification?
+// OR, since I cannot easily run Next.js server actions from a standalone script without full build,
+// I will create a temporary route /api/test-refine that calls the action and returns the result,
+// then I call that rout via curl/fetch.

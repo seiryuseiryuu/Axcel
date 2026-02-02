@@ -1,5 +1,6 @@
 // Simplified layout for AI Studio focus
-export const maxDuration = 60; // Set Vercel Function timeout to 60s (Hobby Limit)
+export const runtime = 'nodejs'; // Explicitly use Node.js runtime
+export const maxDuration = 300; // Set Vercel Function timeout to 300s (5min)
 
 export default function StudentLayout({
     children,

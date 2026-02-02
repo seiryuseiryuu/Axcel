@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateText } from "@/lib/gemini";
 import { OutlineRequest, ArticleOutline } from "@/types/seo-types";
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
+// const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || ""); // Removed
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       wordCountMax
     } = body;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    // const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" }); // Removed
 
     // Get selected improvements
     let selectedAdditions: string[] = [];
@@ -128,8 +128,7 @@ ${body.modificationInstructions ? `
 2. 内部リンクの配置: 読者が情報を補完したいタイミングで自然に内部リンクを配置できるような構成にすること。
 3. H2の数: 基本的に4〜8個程度ですが、タイトルの数字（「10選」など）がある場合はその数を優先・厳守してください。`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const text = await generateText(prompt, 0.7, "gemini-2.0-flash");
 
     // Remove markdown code blocks if present
     let cleanedText = text.trim();

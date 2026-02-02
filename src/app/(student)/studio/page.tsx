@@ -1,7 +1,6 @@
 "use client";
 
-// Allow longer generation times for AI content (60 seconds)
-export const maxDuration = 300;
+// Longer generation times configured in layout.tsx
 
 import { useState, useTransition, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,20 +10,48 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sparkles, Copy, Check, Download, ArrowRight, BookText, Video, Image as ImageIcon, FileVideo, Twitter, Instagram, Presentation, MessageSquare, FileText, Mail, Layout, MonitorPlay, Package, GitBranch, Scissors, Cpu, AlertCircle, Clock } from "lucide-react";
-import { generateContentAction } from "@/app/actions/studio";
+import { generateContentAction, checkStudioAccess, type StudioAccessResult } from "@/app/actions/studio";
+import { useToast } from "@/hooks/use-toast";
 import { StudioToolSidebar, tools } from "@/components/features/studio/StudioToolSidebar";
 import { ThumbnailWorkflow } from "@/components/features/studio/ThumbnailWorkflow";
 import { YouTubeScriptWorkflow } from "@/components/features/studio/YouTubeScriptWorkflow";
 import { SEOWorkflow } from "@/components/features/studio/SEOWorkflow";
-import { checkStudioAccess, StudioAccessResult } from "@/app/actions/studioAccess";
-import { useToast } from "@/hooks/use-toast";
+import { ShortScriptWorkflow } from "@/components/features/studio/ShortScriptWorkflow";
+import { NoteWritingWorkflow } from "@/components/features/studio/NoteWritingWorkflow";
+import { CopywritingWorkflow } from "@/components/features/studio/CopywritingWorkflow";
+import { LineBannerWorkflow } from "@/components/features/studio/LineBannerWorkflow";
+import { NoteThumbnailWorkflow } from "@/components/features/studio/NoteThumbnailWorkflow";
+import { SocialPostWorkflow } from "@/components/features/studio/SocialPostWorkflow";
+import { EyecatchPromptWorkflow } from "@/components/features/studio/EyecatchPromptWorkflow";
+import { InstaStoryWorkflow } from "@/components/features/studio/InstaStoryWorkflow";
+import { RefinementArea } from "@/components/features/studio/RefinementArea";
+import { ThemeCustomizer } from "@/components/ui/ThemeCustomizer";
 
-// Allowed tools for this deployment (3 tools only)
-const ALLOWED_TOOLS = [
-    "/studio/thumbnail",  // YouTubeサムネイル作成
-    "/studio/seo",        // SEO記事作成
-    "/studio/script",     // YouTube動画台本作成
+
+
+// Student用許可ツール（この3つのみ）
+const STUDENT_ALLOWED_TOOLS = [
+    "/studio/thumbnail",    // YouTubeサムネイル
+    "/studio/seo",          // SEO記事
+    "/studio/script",       // YouTube台本
 ];
+
+// Admin用許可ツール（全部）
+const ADMIN_ALLOWED_TOOLS = [
+    "/studio/thumbnail",    // YouTubeサムネイル
+    "/studio/seo",          // SEO記事
+    "/studio/script",       // YouTube台本
+    "/studio/short-script", // ショート動画台本
+    "/studio/social-post",  // X・Threads
+    "/studio/note-writing", // note文章
+    "/studio/sales-letter", // セールスレター
+    "/studio/lp-writing",   // LPライティング
+    "/studio/line-banner",  // LINEバナー
+    "/studio/note-thumbnail", // noteサムネイル
+    "/studio/eyecatch-prompt", // アイキャッチプロンプト作成
+    "/studio/insta-story",  // インスタストーリーズ
+];
+
 
 // Enhanced Tool metadata with expanded input fields
 const toolMeta: Record<string, {
@@ -192,46 +219,19 @@ const toolMeta: Record<string, {
         gradient: "from-purple-500 to-pink-500",
         fields: [] // Handled by ThumbnailWorkflow
     },
-    "/studio/eyecatch": {
-        title: "ブログアイキャッチ",
-        description: "CTR最大化のOGP最適化アイキャッチ設計",
-        icon: ImageIcon,
-        gradient: "from-indigo-500 to-purple-500",
-        fields: [
-            { name: "title", label: "記事タイトル *", placeholder: "例: 副業で月10万円稼ぐ方法【完全ガイド】", required: true },
-            { name: "target", label: "ターゲット読者", placeholder: "例: 20-40代、副業に興味あり" },
-            { name: "brandColor", label: "ブランドカラー", placeholder: "例: #3B82F6（青系）" },
-            {
-                name: "style", label: "デザインスタイル", placeholder: "", options: [
-                    { value: "modern", label: "モダン・クリーン" },
-                    { value: "tech", label: "テック・サイバー" },
-                    { value: "minimal", label: "ミニマル" },
-                    { value: "vibrant", label: "カラフル・ポップ" },
-                ]
-            },
-            { name: "referenceImage", label: "参考画像URL", placeholder: "https://..." },
-        ]
+    "/studio/eyecatch-prompt": {
+        title: "アイキャッチプロンプト作成",
+        description: "SEO記事のHTMLから画像生成AIプロンプトを作成",
+        icon: Sparkles,
+        gradient: "from-violet-500 to-purple-500",
+        fields: [] // Handled by EyecatchPromptWorkflow
     },
     "/studio/insta-story": {
         title: "インスタストーリーズ",
         description: "エンゲージメント最大化のストーリーズシリーズ設計",
         icon: Instagram,
         gradient: "from-fuchsia-500 to-pink-500",
-        fields: [
-            { name: "topic", label: "ストーリーのテーマ *", placeholder: "例: 新商品紹介、Q&A企画", required: true },
-            { name: "seriesCount", label: "シリーズ枚数", placeholder: "5", type: "number" },
-            { name: "followerType", label: "フォロワー層", placeholder: "例: 20-30代女性、美容に興味あり" },
-            { name: "cta", label: "CTA（行動喚起）", placeholder: "例: プロフィールリンクへ" },
-            {
-                name: "interactiveElements", label: "使用したいインタラクティブ要素", placeholder: "", options: [
-                    { value: "poll", label: "投票（2択）" },
-                    { value: "quiz", label: "クイズ" },
-                    { value: "question", label: "質問ボックス" },
-                    { value: "slider", label: "スライダー（絵文字）" },
-                    { value: "countdown", label: "カウントダウン" },
-                ]
-            },
-        ]
+        fields: [] // Handled by InstaStoryWorkflow
     },
     "/studio/line-banner": {
         title: "LINEバナー作成",
@@ -506,7 +506,7 @@ export default function AIStudioPage() {
                 </div>
             )}
 
-            {/* Sidebar - Limited to requested 3 tools */}
+            {/* Sidebar - Limited based on role */}
             <StudioToolSidebar
                 activeTool={activeTool}
                 onToolChange={(tool) => {
@@ -514,36 +514,93 @@ export default function AIStudioPage() {
                     setResult(null);
                     setError(null);
                 }}
-                allowedTools={ALLOWED_TOOLS}
+                allowedTools={accessStatus?.role === 'admin' ? ADMIN_ALLOWED_TOOLS : STUDENT_ALLOWED_TOOLS}
                 isAdmin={accessStatus?.role === 'admin'}
             />
 
             {/* Main Content */}
             <div className="flex-1 overflow-auto p-6">
-                {isThumbnailTool ? (
-                    /* Thumbnail Workflow - Full Featured Component */
+                {/* Theme Customizer */}
+                <ThemeCustomizer />
+
+                {/* Content Area */}
+                {activeTool === "/studio/thumbnail" && (
                     <div className="max-w-6xl mx-auto">
                         <ThumbnailWorkflow
                             onPromptGenerated={(prompt) => console.log("Prompt:", prompt)}
                             onError={(msg) => setError(msg)}
                         />
                     </div>
-                ) : isScriptTool ? (
-                    /* YouTube Script Workflow - Step-by-Step Interactive */
+                )}
+
+                {activeTool === "/studio/script" && (
                     <div className="max-w-4xl mx-auto">
-                        <YouTubeScriptWorkflow
-                            onError={(msg) => setError(msg)}
-                        />
+                        <YouTubeScriptWorkflow onError={(msg) => setError(msg)} />
                     </div>
-                ) : isSeoTool ? (
-                    /* SEO Workflow - 6-Step Interactive */
+                )}
+
+                {activeTool === "/studio/seo" && (
                     <div className="max-w-5xl mx-auto">
-                        <SEOWorkflow
-                            onError={(msg) => setError(msg)}
-                        />
+                        <SEOWorkflow onError={(msg) => setError(msg)} />
                     </div>
-                ) : (
-                    /* Standard Tool Form */
+                )}
+
+                {activeTool === "/studio/short-script" && (
+                    <div className="max-w-5xl mx-auto">
+                        <ShortScriptWorkflow />
+                    </div>
+                )}
+
+                {activeTool === "/studio/social-post" && (
+                    <div className="max-w-4xl mx-auto">
+                        <SocialPostWorkflow />
+                    </div>
+                )}
+
+                {activeTool === "/studio/note-writing" && (
+                    <div className="max-w-4xl mx-auto">
+                        <NoteWritingWorkflow />
+                    </div>
+                )}
+
+                {activeTool === "/studio/sales-letter" && (
+                    <div className="max-w-4xl mx-auto">
+                        <CopywritingWorkflow type="sales-letter" />
+                    </div>
+                )}
+
+                {activeTool === "/studio/lp-writing" && (
+                    <div className="max-w-4xl mx-auto">
+                        <CopywritingWorkflow type="lp-writing" />
+                    </div>
+                )}
+
+                {activeTool === "/studio/line-banner" && (
+                    <div className="max-w-4xl mx-auto">
+                        <LineBannerWorkflow />
+                    </div>
+                )}
+
+                {activeTool === "/studio/note-thumbnail" && (
+                    <div className="max-w-4xl mx-auto">
+                        <NoteThumbnailWorkflow />
+                    </div>
+                )}
+
+                {activeTool === "/studio/eyecatch-prompt" && (
+                    <div className="max-w-4xl mx-auto">
+                        <EyecatchPromptWorkflow onError={(msg) => setError(msg)} />
+                    </div>
+                )}
+
+                {activeTool === "/studio/insta-story" && (
+                    <div className="max-w-4xl mx-auto">
+                        <InstaStoryWorkflow />
+                    </div>
+                )}
+
+                {/* Generic Tools (Eyecatch, Insta Story, etc.) */}
+                {!["/studio/thumbnail", "/studio/script", "/studio/seo", "/studio/short-script", "/studio/social-post", "/studio/note-writing", "/studio/sales-letter", "/studio/lp-writing", "/studio/line-banner", "/studio/note-thumbnail", "/studio/eyecatch-prompt", "/studio/insta-story"].includes(activeTool) && (
                     <div className="max-w-4xl mx-auto space-y-6">
                         {/* Header */}
                         <div className="flex items-center gap-4">
@@ -613,42 +670,41 @@ export default function AIStudioPage() {
 
                         {/* Output */}
                         {(result || isPending || error) && (
-                            <Card className="border-border/50 shadow-md bg-white/90 backdrop-blur-md animate-in fade-in slide-in-from-bottom-4">
-                                <CardHeader className="flex flex-row items-center justify-between py-4 border-b">
-                                    <CardTitle className="text-lg">出力結果</CardTitle>
-                                    {result && (
-                                        <div className="flex gap-2">
-                                            <Button variant="outline" size="sm" onClick={copyToClipboard}>
-                                                {copied ? <Check className="w-4 h-4 mr-1 text-green-500" /> : <Copy className="w-4 h-4 mr-1" />}
-                                                {copied ? "コピー完了" : "コピー"}
-                                            </Button>
-                                            <Button variant="outline" size="sm" onClick={downloadResult}>
-                                                <Download className="w-4 h-4 mr-1" />
-                                                ダウンロード
-                                            </Button>
-                                        </div>
-                                    )}
-                                </CardHeader>
-                                <CardContent className="p-0">
-                                    {isPending ? (
-                                        <div className="flex flex-col items-center justify-center p-12 text-center space-y-4">
-                                            <div className={`w-12 h-12 border-4 border-t-transparent rounded-full animate-spin`} style={{ borderColor: "currentColor", borderTopColor: "transparent" }}></div>
-                                            <p className="text-muted-foreground animate-pulse">
-                                                AI が最高の結果を生成しています...<br />
-                                                <span className="text-xs">※高品質な出力のため、30秒〜1分ほどかかることがあります</span>
-                                            </p>
-                                        </div>
-                                    ) : error ? (
-                                        <div className="p-6 text-red-500 text-center">{error}</div>
-                                    ) : result ? (
-                                        <Textarea
-                                            readOnly
-                                            className="w-full min-h-[400px] border-0 focus-visible:ring-0 resize-y p-6 font-mono text-sm leading-relaxed bg-transparent"
-                                            value={result}
+                            <div className="space-y-6">
+                                {/* Loading State */}
+                                {isPending && (
+                                    <div className="flex flex-col items-center justify-center p-12 text-center space-y-4 bg-white/50 backdrop-blur-sm rounded-xl border border-dashed">
+                                        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                                        <p className="text-muted-foreground animate-pulse">
+                                            AI が最高の結果を生成しています...<br />
+                                            <span className="text-xs">※高品質な出力のため、30秒〜1分ほどかかることがあります</span>
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* Error State */}
+                                {error && (
+                                    <div className="p-6 text-red-500 text-center bg-red-50 border border-red-200 rounded-xl">
+                                        {error}
+                                    </div>
+                                )}
+
+                                {/* Result State with Refinement */}
+                                {result && !isPending && (
+                                    <div className="animate-in fade-in slide-in-from-bottom-4">
+                                        <RefinementArea
+                                            initialContent={result}
+                                            contextData={{
+                                                tool: activeTool,
+                                                toolName: currentMeta.title,
+                                                // Pass form data context if possible, but for generic we keep it simple or extract from last submission if we had state
+                                            }}
+                                            onContentUpdate={(newContent) => setResult(newContent)}
+                                            contentType="text"
                                         />
-                                    ) : null}
-                                </CardContent>
-                            </Card>
+                                    </div>
+                                )}
+                            </div>
                         )}
                     </div>
                 )}

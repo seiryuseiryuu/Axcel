@@ -10,7 +10,7 @@ import {
     BookText, Video, Image, Cpu, ImagePlus, FileVideo,
     Twitter, Instagram, Presentation, MessageSquare, FileText,
     Mail, Layout, MonitorPlay, Package, GitBranch, Scissors,
-    ChevronLeft, ChevronRight, Palette, Sparkles, Home, LogOut
+    ChevronLeft, ChevronRight, Palette, Sparkles, Home, LogOut, Clock
 } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -22,22 +22,25 @@ interface ToolItem {
     category: string;
     isNew?: boolean;
     comingSoon?: boolean;
+    isHistory?: boolean;
 }
 
 const tools: ToolItem[] = [
     // Content Tools
     { title: "SEO記事作成", href: "/studio/seo", icon: BookText, category: "content" },
     { title: "YouTube台本", href: "/studio/script", icon: Video, category: "content" },
-    { title: "ショート動画台本", href: "/studio/short-script", icon: FileVideo, category: "content", comingSoon: true },
-    { title: "X・Threads投稿", href: "/studio/social-post", icon: Twitter, category: "content", comingSoon: true },
-    { title: "note文章", href: "/studio/note-writing", icon: FileText, category: "content", comingSoon: true },
+    { title: "ショート動画台本", href: "/studio/short-script", icon: FileVideo, category: "content" },
+    { title: "X・Threads投稿", href: "/studio/social-post", icon: Twitter, category: "content" },
+    { title: "note文章", href: "/studio/note-writing", icon: FileText, category: "content" },
+    { title: "セールスレター", href: "/studio/sales-letter", icon: Mail, category: "content" },
+    { title: "LPライティング", href: "/studio/lp-writing", icon: Layout, category: "content" },
 
     // Image Tools
     { title: "YouTubeサムネイル", href: "/studio/thumbnail", icon: Image, category: "image" },
-    { title: "ブログアイキャッチ", href: "/studio/eyecatch", icon: ImagePlus, category: "image", comingSoon: true },
-    { title: "インスタストーリーズ", href: "/studio/insta-story", icon: Instagram, category: "image", comingSoon: true },
-    { title: "LINEバナー", href: "/studio/line-banner", icon: MessageSquare, category: "image", comingSoon: true },
-    { title: "note/Brain/Tips", href: "/studio/note-thumbnail", icon: FileText, category: "image", comingSoon: true },
+    { title: "アイキャッチプロンプト", href: "/studio/eyecatch-prompt", icon: Sparkles, category: "image" },
+    { title: "インスタストーリーズ", href: "/studio/insta-story", icon: Instagram, category: "image" },
+    { title: "LINEバナー", href: "/studio/line-banner", icon: MessageSquare, category: "image" },
+    { title: "note/Brain/Tips", href: "/studio/note-thumbnail", icon: FileText, category: "image" },
 
     // Copywriting Tools
     // Strategy Tools
@@ -59,14 +62,16 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
     const [collapsed, setCollapsed] = useState(false);
     const { toast } = useToast();
 
-    // Filter tools if allowedTools is specified
-    const filteredTools = allowedTools
-        ? tools.filter(t => allowedTools.includes(t.href) || t.comingSoon)
-        : tools;
+    // Show all tools, but mark non-allowed ones as "coming soon" for non-admins
+    const displayTools = tools.map(t => ({
+        ...t,
+        // Mark as coming soon if not in allowed list and not already marked
+        comingSoon: !isAdmin && allowedTools && !allowedTools.includes(t.href) ? true : t.comingSoon
+    }));
 
     // Filter categories to only show those with available tools
     const activeCategories = categories.filter(c =>
-        filteredTools.some(t => t.category === c.id)
+        displayTools.some(t => t.category === c.id)
     );
 
     return (
@@ -106,7 +111,7 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                                 </div>
                             )}
                             <div className="space-y-1">
-                                {filteredTools.filter(t => t.category === category.id).map((tool) => {
+                                {displayTools.filter((t: typeof tools[number]) => t.category === category.id).map((tool: typeof tools[number]) => {
                                     const isActive = activeTool === tool.href;
 
                                     if (tool.comingSoon) {
@@ -216,9 +221,26 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
 
                 {!collapsed && (
                     <div className="text-[10px] text-muted-foreground text-center pt-1">
-                        {filteredTools.length}個のAIツール
+                        {displayTools.filter((t: typeof tools[number]) => !t.comingSoon).length}個の利用可能AIツール
                     </div>
                 )}
+            </div>
+
+            {/* History Link (Fixed at bottom) */}
+            <div className="p-2 border-t">
+                <Link href="/student/history" passHref>
+                    <Button
+                        variant="ghost"
+                        className={cn(
+                            "w-full justify-start h-10 text-sm transition-all duration-200 hover:bg-muted font-medium text-foreground/80",
+                            collapsed && "justify-center px-0"
+                        )}
+                        title="生成履歴"
+                    >
+                        <Clock className={cn("h-4 w-4 flex-shrink-0 mr-3", collapsed && "mr-0")} />
+                        {!collapsed && <span>生成履歴</span>}
+                    </Button>
+                </Link>
             </div>
         </div>
     );

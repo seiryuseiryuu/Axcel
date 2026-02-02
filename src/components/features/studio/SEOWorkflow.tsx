@@ -29,6 +29,8 @@ import {
     initialSEOState,
     InternalLink
 } from "@/types/seo-types";
+import { saveCreation } from "@/app/actions/history";
+import { RefinementArea } from "@/components/features/studio/RefinementArea";
 
 const STEPS = [
     { num: 1, label: "キーワード・参考記事", icon: Search },
@@ -478,15 +480,53 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                     ctaText: state.ctaText,
                     referenceArticles: state.referenceArticles,
                     structureAnalyses: state.structureAnalyses,
-                    internalLinks: state.selectedInternalLinks
+                    internalLinks: state.selectedInternalLinks,
+                    includeEyeCatch: state.includeEyeCatch,
                 }),
             });
             const data = await response.json();
             if (data.success) {
+                const articleData = data.data as GeneratedArticle;
                 updateState({
                     step: 6,
-                    generatedContent: data.data as GeneratedArticle,
+                    generatedContent: articleData,
                 });
+
+                // Helper to save history
+                try {
+                    // Convert HTML to Markdown for history
+                    let markdownContent = articleData.content || "";
+                    markdownContent = markdownContent
+                        .replace(/<h1[^>]*>(.*?)<\/h1>/g, '# $1\n')
+                        .replace(/<h2[^>]*>(.*?)<\/h2>/g, '## $1\n')
+                        .replace(/<h3[^>]*>(.*?)<\/h3>/g, '### $1\n')
+                        .replace(/<p[^>]*>(.*?)<\/p>/g, '$1\n\n')
+                        .replace(/<strong>(.*?)<\/strong>/g, '**$1**')
+                        .replace(/<em>(.*?)<\/em>/g, '*$1*')
+                        .replace(/<li>(.*?)<\/li>/g, '- $1\n')
+                        .replace(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/g, '\n')
+                        .replace(/<[^>]+>/g, '');
+
+                    const historyData = {
+                        ...articleData,
+                        content: markdownContent
+                    };
+
+                    const saveResult = await saveCreation(
+                        `SEO記事: ${state.primaryKeyword}`,
+                        'seo_article',
+                        historyData
+                    );
+                    if (!saveResult.success) {
+                        console.error("Failed to save history:", saveResult.error);
+                        // Show error to user
+                        setErrorMessage(`履歴保存エラー: ${saveResult.error}`);
+                    }
+                } catch (err: any) {
+                    console.error("Failed to save history:", err);
+                    setErrorMessage(`履歴保存例外: ${err.message}`);
+                }
+
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             } else {
                 setErrorMessage(data.error || "記事の生成に失敗しました");
@@ -810,6 +850,18 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                 </div>
                             </div>
 
+                            <div className="flex items-center gap-2 pt-2">
+                                <Checkbox
+                                    id="includeEyeCatch"
+                                    checked={state.includeEyeCatch}
+                                    onCheckedChange={(c) => updateState({ includeEyeCatch: !!c })}
+                                />
+                                <Label htmlFor="includeEyeCatch" className="cursor-pointer text-sm">
+                                    アイキャッチ画像用の説明を挿入する
+                                </Label>
+                            </div>
+
+
                             <div className="space-y-2">
                                 <Label>参考記事URL（1〜3本）*</Label>
                                 {[0, 1, 2].map((i) => (
@@ -936,7 +988,8 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                         </CardContent>
                     </Card>
                 </div>
-            )}
+            )
+            }
 
 
             {/* Step 2: Structure Analysis */}
@@ -1679,12 +1732,17 @@ export function SEOWorkflow({ onError }: SEOWorkflowProps) {
                                     </div>
                                 )}
 
-                                <Textarea
-                                    className="min-h-[500px] font-mono text-sm"
-                                    value={state.generatedContent.content}
-                                    onChange={(e) => updateState({
-                                        generatedContent: { ...state.generatedContent!, content: e.target.value }
+                                <RefinementArea
+                                    initialContent={typeof state.generatedContent.content === 'string' ? state.generatedContent.content : JSON.stringify(state.generatedContent.content)}
+                                    contextData={{
+                                        tool: "seo_article",
+                                        toolName: "SEO記事作成",
+                                        primaryKeyword: state.primaryKeyword
+                                    }}
+                                    onContentUpdate={(newContent) => updateState({
+                                        generatedContent: { ...state.generatedContent!, content: newContent }
                                     })}
+                                    contentType="html"
                                 />
 
                                 <div className="flex gap-2 pt-4">

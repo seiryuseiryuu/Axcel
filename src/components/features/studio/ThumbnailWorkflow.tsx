@@ -16,6 +16,9 @@ import {
     Upload, Image as ImageIcon, X
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { saveCreation } from "@/app/actions/history";
+import { uploadImage } from "@/app/actions/storage";
+import { RefinementArea } from "@/components/features/studio/RefinementArea";
 
 interface ThumbnailWorkflowProps {
     onPromptGenerated: (prompt: string) => void;
@@ -98,10 +101,9 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
             if (event.target?.result) {
                 const newImage: ChannelThumbnail = {
                     id: `upload-${Date.now()}`,
+                    video_id: `upload-${Date.now()}`,
                     thumbnail_url: event.target.result as string,
                     video_title: file.name,
-                    published_at: new Date().toISOString(),
-                    view_count: 0
                 };
                 setUploadedImages(prev => [...prev, newImage]);
                 // Automatically select uploaded image
@@ -215,6 +217,10 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 .filter(Boolean)
                 .slice(0, 2);
 
+            // Determine if we should preserve the model person (Edit Mode)
+            // If we have a selected model and NO user uploaded materials, we assume we want to keep the model exactly as is.
+            const shouldPreservePerson = selectedModel !== null && uploadedImages.length === 0;
+
             const res = await generateFinalThumbnails(
                 selectedModel,
                 workflow.text,
@@ -222,7 +228,8 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 1, // Only 1 image requested
                 patternData,
                 referenceUrls,
-                workflow.generatedPrompt // Use custom prompt
+                workflow.generatedPrompt, // Use custom prompt
+                shouldPreservePerson
             );
 
             if (res.error) {
@@ -230,6 +237,39 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 toast({ title: "生成エラー", description: res.error, variant: "destructive" });
             } else if (res.data) {
                 setWorkflow(prev => ({ ...prev, generatedImages: res.data!, step: 6, isPromptEditing: false }));
+
+                // Save to History - Upload images first then save URLs
+                try {
+                    const uploadedArtifacts = [];
+                    for (const base64Image of res.data!) {
+                        // Upload to 'thumbnails' bucket, folder 'history'
+                        const uploadRes = await uploadImage(base64Image, 'thumbnails', 'history');
+                        if (uploadRes.success && uploadRes.url) {
+                            uploadedArtifacts.push({ image: uploadRes.url });
+                        } else {
+                            console.warn("History upload failed:", uploadRes.error);
+                            // Fallback: If upload fails, we probably shouldn't save the huge base64
+                            // or maybe save it but it might fail. Let's skip for now or try.
+                        }
+                    }
+
+                    if (uploadedArtifacts.length > 0) {
+                        const saveResult = await saveCreation(
+                            `サムネイル: ${workflow.videoTitle}`,
+                            'thumbnail',
+                            uploadedArtifacts
+                        );
+                        if (!saveResult.success) {
+                            console.error("History save failed:", saveResult.error);
+                        }
+                    } else {
+                        console.warn("No images uploaded successfully for history.");
+                        toast({ title: "保存警告", description: "画像のアップロードに失敗したため、履歴には保存されませんでした。", variant: "destructive" });
+                    }
+                } catch (e) {
+                    console.error("History save exception:", e);
+                }
+
                 toast({ title: "生成完了", description: "サムネイルが完成しました" });
             }
         });
@@ -597,10 +637,17 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                                     AIへの指示書（プロンプト）
                                 </Label>
                                 <div className="relative border-2 border-primary/20 rounded-xl overflow-hidden shadow-sm">
-                                    <Textarea
-                                        value={workflow.generatedPrompt}
-                                        onChange={(e) => setWorkflow(prev => ({ ...prev, generatedPrompt: e.target.value }))}
-                                        className="min-h-[300px] font-mono text-sm leading-relaxed p-4 border-0 focus-visible:ring-0 bg-background/50"
+                                    <RefinementArea
+                                        initialContent={workflow.generatedPrompt}
+                                        contextData={{
+                                            tool: "thumbnail",
+                                            toolName: "サムネイル生成",
+                                            title: workflow.videoTitle,
+                                            description: workflow.videoDescription,
+                                            pattern: selectedModel?.patternName
+                                        }}
+                                        onContentUpdate={(newContent) => setWorkflow(prev => ({ ...prev, generatedPrompt: newContent }))}
+                                        contentType="text"
                                     />
                                     <div className="absolute bottom-4 right-4 bg-background/80 backdrop-blur rounded-lg p-2 text-xs text-muted-foreground border shadow-sm">
                                         ※ここを書き換えると生成結果が変わります

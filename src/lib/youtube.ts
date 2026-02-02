@@ -290,9 +290,8 @@ export async function getVideoTranscript(videoId: string): Promise<string> {
         console.log("[getVideoTranscript] Success via Supadata");
         return result0.transcript;
     }
-    if (result0.error !== "SUPADATA_API_KEY not set") {
-        errors.push(`Supadata: ${result0.error || "failed"}`);
-    }
+    // Always report Supadata error to help debugging
+    errors.push(`Supadata: ${result0.error || "failed"}`);
 
     // 方法1: TimedText API (最も軽量)
     const result1 = await fetchTranscriptViaTimedText(videoId);

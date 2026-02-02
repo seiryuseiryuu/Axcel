@@ -35,8 +35,10 @@ export async function fetchChannelInfo(channelUrl: string): Promise<ActionRespon
         // 1. Resolve to Channel ID if handle
         if (handle && !channelId) {
             // FIRST: Try the official forHandle API (most accurate)
-            const handleApiUrl = `https://www.googleapis.com/youtube/v3/channels?part=id,snippet&forHandle=${encodeURIComponent(handle)}&key=${YOUTUBE_API_KEY}`;
-            console.log("[fetchChannelInfo] Trying forHandle API for:", handle);
+            // Note: forHandle parameter MUST include the '@' symbol
+            const handleWithAt = handle.startsWith('@') ? handle : '@' + handle;
+            const handleApiUrl = `https://www.googleapis.com/youtube/v3/channels?part=id,snippet&forHandle=${encodeURIComponent(handleWithAt)}&key=${YOUTUBE_API_KEY}`;
+            console.log("[fetchChannelInfo] Trying forHandle API for:", handleWithAt);
 
             const handleRes = await fetch(handleApiUrl);
             if (handleRes.ok) {
@@ -62,15 +64,28 @@ export async function fetchChannelInfo(channelUrl: string): Promise<ActionRespon
                             return { success: false, error: "YouTube APIの1日の利用枠を超過しました。明日再度お試しください。" };
                         }
                     } catch (e) { /* ignore parse error */ }
-                    return { success: false, error: `YouTube API Error: ${searchRes.status} ${searchRes.statusText}` };
+                    // Continue to next fallback or return error
+                    console.log("[fetchChannelInfo] Search failed, trying without @ prefix in query");
+                } else {
+                    const searchData = await searchRes.json();
+                    if (searchData.items && searchData.items.length > 0) {
+                        const foundChannel = searchData.items[0];
+                        channelId = foundChannel.snippet.channelId;
+                        console.log("[fetchChannelInfo] Found via search:", channelId, foundChannel.snippet.title);
+                    }
                 }
+            }
 
-                const searchData = await searchRes.json();
-                if (searchData.items && searchData.items.length > 0) {
-                    // Verify the channel title or handle matches
-                    const foundChannel = searchData.items[0];
-                    channelId = foundChannel.snippet.channelId;
-                    console.log("[fetchChannelInfo] Found via search:", channelId, foundChannel.snippet.title);
+            // FALLBACK 2: Search with exact channel name match if handle fails (sometimes handles are just custom names)
+            if (!channelId) {
+                const searchUrl2 = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(handle)}&maxResults=1&key=${YOUTUBE_API_KEY}`;
+                const searchRes2 = await fetch(searchUrl2);
+                if (searchRes2.ok) {
+                    const searchData2 = await searchRes2.json();
+                    if (searchData2.items && searchData2.items.length > 0) {
+                        channelId = searchData2.items[0].snippet.channelId;
+                        console.log("[fetchChannelInfo] Found via name search:", channelId);
+                    }
                 }
             }
         }
