@@ -42,7 +42,7 @@ interface WorkflowState {
 }
 
 const STEPS = [
-    { num: 1, title: "タイトル入力", icon: Type },
+    { num: 1, title: "テキスト入力", icon: Type },
     { num: 2, title: "チャンネル選択", icon: Youtube },
     { num: 3, title: "パターン分析", icon: Eye },
     { num: 4, title: "モデル選択", icon: Sparkles },

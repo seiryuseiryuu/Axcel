@@ -410,7 +410,7 @@ ${pattern.description}
 【生成ルール】
 - アスペクト比: 16:9（1280x720） ※正方形は不可。必ず横長のYouTubeサムネイルサイズで出力すること。
 - 上記パターンの特徴を忠実に再現
-- テロップ: ${text ? `「${text}」という文字を配置（文字化けを防ぐため、正確な日本語で描画）` : '【重要】文字・テロップは一切入れない（No Text）。画像とデザインのみで構成する'}`;
+- テロップ: ${text ? `「${text}」という文字を配置（文字化けを防ぐため、正確な日本語で描画）。【重要】これ以外の文字（英語、数字、記号）は一切入れないこと。` : '【重要】文字・テロップは一切入れない（No Text）。画像とデザインのみで構成する。英語の文字や謎の記号も禁止。'}`;
 
             let imageUrl: string;
             try {
@@ -651,8 +651,9 @@ export async function generateFinalThumbnails(
             ? `【TEXT OVERLAY】
         Text: "${text}"
         Style: ${customPrompt ? "Follow [USER OVERRIDE INSTRUCTIONS] below for font/color metrics." : "Match the exact BOLD Gothic/Impact font and 3D/stroke effects from the Pattern Reference image."}
-        Legibility: High contrast, clearly readable.`
-            : '【TEXT OVERLAY】\nNO TEXT.';
+        Legibility: High contrast, clearly readable.
+        [CONSTRAINT] ONLY render the text "${text}". Do NOT add any other words, subtitles, English text, or gibberish. If the reference image has other text, REMOVE IT and replace/overlay with this exact text.`
+            : '【TEXT OVERLAY】\nNO TEXT. Do not render any characters.';
 
         let materialInstruction = '';
         if (imageRoleDescriptions.length > 0) {
