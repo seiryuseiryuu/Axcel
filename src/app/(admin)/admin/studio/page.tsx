@@ -23,7 +23,7 @@ const tools: Tool[] = [
     { title: "SEO記事作成", description: "4段階確認で高品質なSEO記事を作成", href: "/admin/studio/seo", icon: BookText, color: "text-blue-500", category: "content" },
     { title: "YouTube台本", description: "視聴維持率の高い動画台本を生成", href: "/admin/studio/script", icon: Video, color: "text-red-500", category: "content" },
     { title: "ショート動画台本", description: "TikTok/Shorts/Reels用の台本", href: "/admin/studio/short-script", icon: FileVideo, color: "text-pink-500", category: "content" },
-    { title: "動画切り抜き分析", description: "長尺動画からバズるショートを提案", href: "/admin/studio/video-clip", icon: Scissors, color: "text-orange-500", category: "content", isNew: true },
+    { title: "動画切り抜き分析", description: "長尺動画からバズるショートを提案", href: "/admin/studio/video-clip", icon: Scissors, color: "text-orange-500", category: "content" },
     { title: "X・Threads投稿", description: "バズるSNS投稿を3パターン生成", href: "/admin/studio/social-post", icon: Twitter, color: "text-sky-500", category: "content" },
     { title: "note文章", description: "note記事をAIで作成", href: "/admin/studio/note-writing", icon: FileText, color: "text-teal-500", category: "content" },
     { title: "プレゼン資料", description: "スライド構成とノートを生成", href: "/admin/studio/presentation", icon: Presentation, color: "text-amber-500", category: "content" },
