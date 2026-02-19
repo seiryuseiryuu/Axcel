@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -26,6 +26,11 @@ export function RefinementArea({ initialContent, contextData, onContentUpdate, c
     const [instruction, setInstruction] = useState("");
     const [isPending, startTransition] = useTransition();
     const [history, setHistory] = useState<{ role: 'user' | 'ai', text: string }[]>([]);
+
+    // Sync content when initialContent changes (e.g. after async generation)
+    useEffect(() => {
+        setContent(initialContent);
+    }, [initialContent]);
 
     const handleRefine = () => {
         if (!instruction.trim()) return;
