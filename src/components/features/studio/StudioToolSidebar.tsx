@@ -46,7 +46,6 @@ const tools: ToolItem[] = [
     // Image Tools
     { title: "YouTubeサムネイル", href: "/studio/thumbnail", icon: Image, category: "image" },
     { title: "アイキャッチプロンプト", href: "/studio/eyecatch-prompt", icon: Sparkles, category: "image" },
-    { title: "インスタストーリーズ", href: "/studio/insta-story", icon: Instagram, category: "image" },
     { title: "LINEバナー", href: "/studio/line-banner", icon: MessageSquare, category: "image" },
     { title: "note/Brain/Tips", href: "/studio/note-thumbnail", icon: FileText, category: "image" },
 

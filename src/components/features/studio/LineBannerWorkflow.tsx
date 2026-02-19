@@ -1,461 +1,414 @@
 "use client";
 
-import { useState, useTransition, useRef } from "react";
+import { useState, useTransition } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Sparkles, Image as ImageIcon, ScanEye, Download, Upload, X, ArrowRight, ArrowLeft, Wand2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { saveCreation } from "@/app/actions/history";
-import { analyzeLineBanner, generateLineBanners, generateLinePrompt, type LineBannerInfo } from "@/app/actions/lineBanner";
-import { RefinementArea } from "@/components/features/studio/RefinementArea";
+import { Loader2, Upload, ImageIcon, RefreshCw, Wand2, Download, History, Palette } from "lucide-react";
+import Image from "next/image";
+import * as LineBannerActions from "@/app/actions/lineBanner";
+import { uploadImage } from "@/app/actions/storage";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+
+// Size definitions for UI
+const BANNER_SIZES = [
+    { id: 'square', name: '正方形 (1040x1040)', ratio: '1:1', desc: '標準的なリッチメッセージ・投稿用' },
+    { id: 'card_small', name: '横長 小 (1040x350)', ratio: '3:1', desc: 'コンパクトなアナウンス用' },
+    { id: 'card_large', name: '横長 大 (1040x700)', ratio: '3:2', desc: '標準的な横型リッチメッセージ' },
+    { id: 'vertical', name: '縦長 (1040x1300)', ratio: '4:5', desc: 'スマホ画面を大きく使う縦型' },
+    { id: 'vertical_full', name: '縦長 フル (1040x1850)', ratio: '9:16', desc: '画面占有率最大。インパクト重視' },
+];
 
 export function LineBannerWorkflow() {
     const { toast } = useToast();
     const [isPending, startTransition] = useTransition();
     const [step, setStep] = useState(1);
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Inputs
-    const [bannerInfo, setBannerInfo] = useState<LineBannerInfo>({
-        message: "",
-        campaignDetail: "",
-        size: "rich_message",
-        buttonText: "詳細を見る",
-        referenceImage: "" // URL for now
-    });
-    const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+    // Step 1: Settings
+    const [sizeMode, setSizeMode] = useState("square");
+    const [referenceImage, setReferenceImage] = useState<string | null>(null); // URL or Base64 (from upload)
+    const [mainColor, setMainColor] = useState("#00B900"); // Default LINE Green
+    const [useCustomColor, setUseCustomColor] = useState(false);
 
-    // Results
+    // Step 2: Generation
     const [analysisResult, setAnalysisResult] = useState<any>(null);
-    const [promptText, setPromptText] = useState("");
-    const [generatedImages, setGeneratedImages] = useState<any[]>([]);
+    const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+    const [customPrompt, setCustomPrompt] = useState("");
 
-    // Text block replacements and refinement history (matching Note workflow)
-    const [textBlockReplacements, setTextBlockReplacements] = useState<Record<string, string>>({});
-    const [refinementHistory, setRefinementHistory] = useState<string[]>([]);
+    // Additional Materials
+    const [additionalMaterials, setAdditionalMaterials] = useState<{ image: string; description: string }[]>([]);
 
-    // Handle File Upload
+    // History
+    const [history, setHistory] = useState<string[]>([]);
+
+    // Handlers
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
+
         const reader = new FileReader();
-        reader.onload = (event) => {
-            if (event.target?.result) {
-                setUploadedImage(event.target.result as string);
-                setBannerInfo(prev => ({ ...prev, referenceImage: "" })); // Clear URL
-            }
+        reader.onload = () => {
+            const base64 = reader.result as string;
+            startTransition(async () => {
+                const result = await uploadImage(base64);
+                if (result.success && result.url) {
+                    setReferenceImage(result.url);
+                    toast({ title: "画像をアップロードしました" });
+                } else {
+                    toast({ title: "アップロード失敗", variant: "destructive" });
+                }
+            });
         };
         reader.readAsDataURL(file);
     };
 
-    // Initialize text block replacements
-    const initializeTextBlocks = (blocks: any[]) => {
-        if (!blocks) return;
-        const initial: Record<string, string> = {};
-        blocks.forEach((block: any) => {
-            initial[block.id] = "";
-        });
-        setTextBlockReplacements(initial);
-    };
-
     const handleAnalyze = () => {
-        const imageSource = uploadedImage || bannerInfo.referenceImage;
-        if (!imageSource) {
-            toast({ title: "参考画像を指定してください", variant: "destructive" });
+        if (!referenceImage) {
+            toast({ title: "参考画像を選択してください", variant: "destructive" });
             return;
         }
+
         startTransition(async () => {
-            const result = await analyzeLineBanner(imageSource);
+            const result = await LineBannerActions.analyzeLineBanner(referenceImage);
             if (result.success && result.data) {
                 setAnalysisResult(result.data);
-
-                // Initialize text block replacements
-                if (result.data.text_blocks) {
-                    initializeTextBlocks(result.data.text_blocks);
-                }
-
-                // Prompt Generation
-                const promptRes = await generateLinePrompt(result.data, bannerInfo);
-                if (promptRes.success) {
-                    setPromptText(promptRes.prompt);
-                    setStep(2);
-                    toast({ title: "分析完了", description: "プロンプトを確認してください" });
-                } else {
-                    toast({ title: "プロンプト生成エラー", description: promptRes.error, variant: "destructive" });
-                }
+                setStep(2);
+                // Auto generate first batch? Or let user describe first?
+                // Let's go to step 2 and let user click generate.
             } else {
-                toast({ title: "エラー", description: result.error, variant: "destructive" });
+                toast({ title: "分析エラー", description: result.error, variant: "destructive" });
             }
         });
     };
 
     const handleGenerate = () => {
         if (!analysisResult) return;
-        const imageSource = uploadedImage || bannerInfo.referenceImage;
-        const finalInfo = {
-            ...bannerInfo,
-            referenceImage: imageSource || undefined
-        };
-
-        // Build final prompt with text block replacements and refinement history
-        let finalPrompt = promptText;
-
-        const blockInstructions = Object.entries(textBlockReplacements)
-            .filter(([_, text]) => text.trim())
-            .map(([id, text]) => `- ${id}: 「${text}」`)
-            .join('\n');
-        if (blockInstructions) {
-            finalPrompt += `\n\n【重要：テキストブロック置換（厳守）】\n以下のテキストは**必ず**画像内に表示してください。\n${blockInstructions}`;
-        }
-
-        if (refinementHistory.length > 0) {
-            finalPrompt += `\n\n【過去の修正指示（累積）】\n` + refinementHistory.map((r, i) => `${i + 1}. ${r}`).join('\n');
-        }
 
         startTransition(async () => {
-            const result = await generateLineBanners(
+            const result = await LineBannerActions.generateLineBanner(
                 analysisResult,
-                finalInfo,
                 1,
-                finalPrompt
+                customPrompt,
+                sizeMode,
+                referenceImage!,
+                generatedImages.length > 0 ? generatedImages[0] : null,
+                additionalMaterials,
+                useCustomColor ? mainColor : undefined
             );
 
-            if (result.success && result.images) {
-                setGeneratedImages(result.images);
-
-                // Save to History - await properly
-                try {
-                    const saveResult = await saveCreation(
-                        `LINEバナー: ${bannerInfo.message.slice(0, 15)}...`,
-                        'image',
-                        result.images
-                    );
-                    if (saveResult.success) {
-                        toast({ title: "生成完了", description: "履歴に保存されました" });
-                    } else {
-                        console.error("History save failed:", saveResult.error);
-                        toast({ title: "生成完了", description: `履歴保存エラー: ${saveResult.error}`, variant: "destructive" });
-                    }
-                } catch (e: any) {
-                    console.error("History save exception:", e);
-                    toast({ title: "生成完了", description: `履歴保存例外: ${e.message}`, variant: "destructive" });
-                }
-
-                setStep(3);
+            if (result.success && result.images && result.images.length > 0) {
+                const newImageUrl = result.images[0].imageUrl;
+                setGeneratedImages([newImageUrl, ...generatedImages]);
+                setHistory(prev => [newImageUrl, ...prev]);
+                toast({ title: "バナーを生成しました" });
             } else {
-                toast({ title: "生成失敗", description: "画像の生成に失敗しました", variant: "destructive" });
+                toast({ title: "生成エラー", description: result.error, variant: "destructive" });
             }
         });
     };
 
-    // Add refinement and regenerate
-    const handleRefinement = (instruction: string) => {
-        if (!instruction.trim()) return;
-        setRefinementHistory(prev => [...prev, instruction]);
-        handleGenerate();
-    };
-
     return (
-        <div className="space-y-8 max-w-4xl mx-auto pb-20">
-            {/* STEP 1: Input */}
+        <div className="max-w-5xl mx-auto p-6 space-y-8">
+            {/* Header */}
+            <div>
+                <h2 className="text-2xl font-bold tracking-tight">LINE Banner Creator</h2>
+                <p className="text-muted-foreground">公式LINE用のリッチメッセージ・バナーを作成します。</p>
+            </div>
+
+            {/* Steps Indicator */}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
+                <span className={step === 1 ? "font-bold text-primary" : ""}>Step 1: 設定</span>
+                <span>/</span>
+                <span className={step === 2 ? "font-bold text-primary" : ""}>Step 2: 生成・調整</span>
+            </div>
+
+            {/* STEP 1: Configuration */}
             {step === 1 && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>STEP 1: バナー要件定義</CardTitle>
-                        <CardDescription>作成したいバナーの情報と、参考にしたいバナー画像を入力してください。</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>バナーサイズ</Label>
-                                <Select
-                                    value={bannerInfo.size}
-                                    onValueChange={(v: any) => setBannerInfo({ ...bannerInfo, size: v })}
-                                >
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="rich_message">リッチメッセージ (1040x1040)</SelectItem>
-                                        <SelectItem value="rich_menu">リッチメニュー (2500x1686)</SelectItem>
-                                        <SelectItem value="card">カードタイプ (1024x520)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            {/* Upload Area */}
-                            <div className="space-y-2">
-                                <Label>参考バナー画像 <span className="text-red-500">*</span></Label>
-                                <div className="flex gap-2">
-                                    <Input
-                                        value={bannerInfo.referenceImage || ""}
-                                        onChange={(e) => {
-                                            setBannerInfo({ ...bannerInfo, referenceImage: e.target.value });
-                                            setUploadedImage(null);
-                                        }}
-                                        placeholder="https://example.com/banner.jpg"
-                                        disabled={!!uploadedImage}
-                                        className="flex-1"
-                                    />
-                                    <Button
-                                        variant="outline" size="icon"
-                                        onClick={() => fileInputRef.current?.click()}
-                                    >
-                                        <Upload className="w-4 h-4" />
-                                    </Button>
-                                    <input
-                                        type="file"
-                                        ref={fileInputRef}
-                                        className="hidden"
-                                        accept="image/*"
-                                        onChange={handleImageUpload}
-                                    />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4">
+                    {/* Left: Settings */}
+                    <div className="space-y-6">
+                        {/* Size Selection */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">1. バナーサイズを選択</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-3">
+                                    <RadioGroup value={sizeMode} onValueChange={setSizeMode}>
+                                        {BANNER_SIZES.map((size) => (
+                                            <div key={size.id} className="flex items-center space-x-2 border p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer">
+                                                <RadioGroupItem value={size.id} id={size.id} />
+                                                <Label htmlFor={size.id} className="flex-1 cursor-pointer">
+                                                    <div className="font-medium">{size.name}</div>
+                                                    <div className="text-xs text-muted-foreground">{size.desc}</div>
+                                                </Label>
+                                                <div className="text-xs font-mono bg-muted px-2 py-1 rounded">{size.ratio}</div>
+                                            </div>
+                                        ))}
+                                    </RadioGroup>
                                 </div>
+                            </CardContent>
+                        </Card>
 
-                                {uploadedImage && (
-                                    <div className="mt-2 relative w-full h-20 rounded-md overflow-hidden border bg-muted">
-                                        <img src={uploadedImage} className="w-full h-full object-contain" />
-                                        <Button
-                                            size="icon"
-                                            variant="destructive"
-                                            className="absolute top-1 right-1 h-5 w-5"
-                                            onClick={() => setUploadedImage(null)}
-                                        >
-                                            <X className="w-3 h-3" />
-                                        </Button>
+                        {/* Color Selection */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">2. メインカラー設定</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="flex items-center space-x-2">
+                                    <input
+                                        type="checkbox"
+                                        id="useCustomColor"
+                                        checked={useCustomColor}
+                                        onChange={(e) => setUseCustomColor(e.target.checked)}
+                                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                    />
+                                    <Label htmlFor="useCustomColor">カラーを指定する（チェックなしはお任せ）</Label>
+                                </div>
+                                {useCustomColor && (
+                                    <div className="flex items-center gap-4 animate-in fade-in">
+                                        <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-slate-200">
+                                            <input
+                                                type="color"
+                                                value={mainColor}
+                                                onChange={(e) => setMainColor(e.target.value)}
+                                                className="absolute inset-0 w-[150%] h-[150%] -top-1/4 -left-1/4 p-0 cursor-pointer"
+                                            />
+                                        </div>
+                                        <div className="flex-1">
+                                            <Label>カラーコード</Label>
+                                            <Input
+                                                value={mainColor}
+                                                onChange={(e) => setMainColor(e.target.value)}
+                                                className="font-mono mt-1"
+                                            />
+                                        </div>
                                     </div>
                                 )}
-                            </div>
-                        </div>
+                            </CardContent>
+                        </Card>
+                    </div>
 
-                        <div className="space-y-2">
-                            <Label>メインコピー（キャッチコピー） <span className="text-red-500">*</span></Label>
-                            <Input
-                                placeholder="例：期間限定50%OFF！"
-                                value={bannerInfo.message}
-                                onChange={(e) => setBannerInfo({ ...bannerInfo, message: e.target.value })}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label>サブテキスト（キャンペーン詳細）</Label>
-                            <Textarea
-                                placeholder="詳細な条件や期間など"
-                                value={bannerInfo.campaignDetail}
-                                onChange={(e) => setBannerInfo({ ...bannerInfo, campaignDetail: e.target.value })}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label>ボタンテキスト</Label>
-                            <Input
-                                value={bannerInfo.buttonText}
-                                onChange={(e) => setBannerInfo({ ...bannerInfo, buttonText: e.target.value })}
-                            />
-                        </div>
-
-                        <Button className="w-full" size="lg" onClick={handleAnalyze} disabled={isPending || !bannerInfo.message || (!bannerInfo.referenceImage && !uploadedImage)}>
-                            {isPending ? <Loader2 className="animate-spin mr-2" /> : <ScanEye className="mr-2" />}
-                            参考画像を分析する
-                        </Button>
-                    </CardContent>
-                </Card>
+                    {/* Right: Upload */}
+                    <div className="space-y-6">
+                        <Card className="h-full flex flex-col">
+                            <CardHeader>
+                                <CardTitle className="text-base">3. 参考画像をアップロード</CardTitle>
+                                <CardDescription>
+                                    作成したいイメージに近いバナー画像をアップロードしてください。<br />
+                                    レイアウトや雰囲気を学習して、指定サイズにリサイズ・調整します。
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="flex-1 flex flex-col justify-center items-center gap-4 p-8 border-dashed border-2 rounded-lg m-6 mt-0 bg-slate-50 dark:bg-slate-900/50">
+                                {referenceImage ? (
+                                    <div className="relative w-full h-full min-h-[300px] flex items-center justify-center">
+                                        <Image
+                                            src={referenceImage}
+                                            alt="Reference"
+                                            fill
+                                            className="object-contain rounded-lg"
+                                        />
+                                        <Button
+                                            variant="destructive"
+                                            size="sm"
+                                            className="absolute top-2 right-2"
+                                            onClick={() => setReferenceImage(null)}
+                                        >
+                                            削除
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <div className="text-center space-y-4">
+                                        <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto">
+                                            <Upload className="w-8 h-8 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <Button variant="outline" className="relative">
+                                                ファイルを選択
+                                                <input
+                                                    type="file"
+                                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                                    accept="image/*"
+                                                    onChange={handleImageUpload}
+                                                />
+                                            </Button>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">JPG, PNG, WEBP (Max 10MB)</p>
+                                    </div>
+                                )}
+                            </CardContent>
+                            <CardFooter>
+                                <Button
+                                    className="w-full"
+                                    size="lg"
+                                    onClick={handleAnalyze}
+                                    disabled={!referenceImage || isPending}
+                                >
+                                    {isPending ? <Loader2 className="mr-2 animate-spin" /> : <Wand2 className="mr-2" />}
+                                    画像を分析して次へ
+                                </Button>
+                            </CardFooter>
+                        </Card>
+                    </div>
+                </div>
             )}
 
-            {/* STEP 2: Refinement */}
+            {/* STEP 2: Generate & Refine */}
             {step === 2 && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>STEP 2: デザイン指示の調整</CardTitle>
-                        <CardDescription>生成AIに送る指示書（プロンプト）を調整できます。</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                        {/* Reference Image Preview */}
-                        <div className="flex gap-4 items-start">
-                            <div className="w-32 h-32 rounded border overflow-hidden bg-muted flex-shrink-0">
-                                <img
-                                    src={uploadedImage || bannerInfo.referenceImage}
-                                    alt="参考画像"
-                                    className="w-full h-full object-cover"
-                                />
-                            </div>
-                            <div className="bg-muted p-4 rounded-lg space-y-2 text-sm flex-1">
-                                <p className="font-bold border-b pb-2 mb-2">抽出されたデザインルール</p>
-                                {analysisResult && (
-                                    <>
-                                        <p>📐 レイアウト: {analysisResult.layout}</p>
-                                        <p>🎨 配色: {analysisResult.colors?.main} / {analysisResult.colors?.accent}</p>
-                                        <p>🖋️ タイポグラフィ: {analysisResult.typography}</p>
-                                    </>
-                                )}
-                            </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in slide-in-from-right-4">
+                    {/* Left Column: Controls */}
+                    <div className="space-y-6 lg:col-span-1">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-base">生成設定</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="text-sm border p-2 rounded bg-muted/50">
+                                    <div className="font-semibold mb-1">現在の設定:</div>
+                                    <div>サイズ: {BANNER_SIZES.find(s => s.id === sizeMode)?.name}</div>
+                                    <div>カラー: {useCustomColor ? mainColor : "画像準拠"}</div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>指示・修正リクエスト</Label>
+                                    <Textarea
+                                        value={customPrompt}
+                                        onChange={(e) => setCustomPrompt(e.target.value)}
+                                        placeholder="例：もっと文字を大きくして、キラキラさせて"
+                                        className="h-24 resize-none"
+                                    />
+                                </div>
+                                <Button onClick={handleGenerate} className="w-full" disabled={isPending}>
+                                    {isPending ? <Loader2 className="mr-2 animate-spin" /> : <RefreshCw className="mr-2" />}
+                                    バナーを生成
+                                </Button>
+                                <Button variant="ghost" onClick={() => setStep(1)} className="w-full">
+                                    設定に戻る
+                                </Button>
+                            </CardContent>
+                        </Card>
+
+                        {/* Additional Materials (Simplified) */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-sm">追加素材（ロゴ・写真など）</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-2">
+                                    {additionalMaterials.map((mat, i) => (
+                                        <div key={i} className="flex items-center gap-2 text-xs bg-muted p-2 rounded">
+                                            <ImageIcon className="w-4 h-4" />
+                                            <span className="truncate flex-1">{mat.description || `素材 ${i + 1}`}</span>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-6 w-6"
+                                                onClick={() => setAdditionalMaterials(prev => prev.filter((_, idx) => idx !== i))}
+                                            >
+                                                ×
+                                            </Button>
+                                        </div>
+                                    ))}
+                                    <div className="relative">
+                                        <Button variant="outline" size="sm" className="w-full text-xs">
+                                            素材を追加 (+ Upload)
+                                            <input
+                                                type="file"
+                                                className="absolute inset-0 opacity-0 cursor-pointer"
+                                                accept="image/*"
+                                                onChange={(e) => {
+                                                    const f = e.target.files?.[0];
+                                                    if (f) {
+                                                        const reader = new FileReader();
+                                                        reader.onload = async () => {
+                                                            const base64 = reader.result as string;
+                                                            const res = await uploadImage(base64);
+                                                            if (res.success) {
+                                                                setAdditionalMaterials([...additionalMaterials, { image: res.url!, description: f.name }]);
+                                                            }
+                                                        };
+                                                        reader.readAsDataURL(f);
+                                                    }
+                                                }}
+                                            />
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* Right Column: Preview */}
+                    <div className="lg:col-span-2 space-y-6">
+                        <div className="min-h-[500px] border-2 border-dashed rounded-lg flex items-center justify-center p-8 bg-slate-50 dark:bg-slate-900/50 relative">
+                            {generatedImages.length > 0 ? (
+                                <div className="relative w-full h-full flex flex-col items-center">
+                                    <div className="relative shadow-lg rounded-lg overflow-hidden border" style={{
+                                        // Dynamic aspect ratio calculation for preview inline style if needed, 
+                                        // but simple max-width/height is safer.
+                                        maxWidth: '100%',
+                                        maxHeight: '600px'
+                                    }}>
+                                        <img
+                                            src={generatedImages[0]}
+                                            alt="Generated Banner"
+                                            className="max-w-full max-h-[600px] object-contain"
+                                        />
+                                    </div>
+                                    <div className="mt-4 flex gap-4">
+                                        <Button variant="outline" onClick={() => window.open(generatedImages[0], '_blank')}>
+                                            <Download className="mr-2 w-4 h-4" /> 保存 / 確認
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center text-muted-foreground">
+                                    <Palette className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                                    <p>「バナーを生成」ボタンを押してデザインを作成します</p>
+                                </div>
+                            )}
+                            {isPending && (
+                                <div className="absolute inset-0 bg-background/80 flex items-center justify-center backdrop-blur-sm z-10">
+                                    <div className="text-center">
+                                        <Loader2 className="w-10 h-10 animate-spin mx-auto mb-4 text-primary" />
+                                        <p>AIがデザインを作成中...</p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        {/* Text Block Replacement Section */}
-                        {analysisResult?.text_blocks && analysisResult.text_blocks.length > 0 && (
-                            <div className="bg-blue-50 dark:bg-blue-950 p-4 rounded border border-blue-200 dark:border-blue-800 space-y-4">
-                                <div>
-                                    <p className="font-bold text-sm">📝 テキストブロック置換</p>
-                                    <p className="text-xs text-muted-foreground">参考画像で検出されたテキストを、あなたのテキストに置き換えます。</p>
-                                </div>
-                                <div className="space-y-3">
-                                    {analysisResult.text_blocks.map((block: any) => (
-                                        <div key={block.id} className="space-y-1">
-                                            <div className="flex items-center gap-2">
-                                                <Label className="text-xs font-medium">{block.id}</Label>
-                                                <span className="text-xs text-muted-foreground">({block.size}, {block.position})</span>
-                                            </div>
-                                            <p className="text-xs text-muted-foreground italic mb-1">元のテキスト: 「{block.original_text}」</p>
-                                            <Input
-                                                value={textBlockReplacements[block.id] || ''}
-                                                onChange={(e) => setTextBlockReplacements(prev => ({ ...prev, [block.id]: e.target.value }))}
-                                                placeholder="置換するテキストを入力..."
-                                                className="w-full"
-                                            />
+                        {/* History */}
+                        {history.length > 0 && (
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-medium flex items-center gap-2">
+                                    <History className="w-4 h-4" /> 生成履歴
+                                </h3>
+                                <div className="grid grid-cols-4 md:grid-cols-6 gap-4">
+                                    {history.map((img, i) => (
+                                        <div
+                                            key={i}
+                                            className="relative aspect-square rounded-md overflow-hidden border cursor-pointer hover:ring-2 ring-primary transition-all"
+                                            onClick={() => {
+                                                // Move to top
+                                                const newHistory = history.filter((_, idx) => idx !== i);
+                                                setGeneratedImages([img, ...newHistory]);
+                                            }}
+                                        >
+                                            <Image src={img} alt={`History ${i}`} fill className="object-cover" />
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         )}
-
-                        <div className="space-y-2">
-                            <Label className="flex items-center gap-2">
-                                <Sparkles className="w-4 h-4 text-primary" /> 生成プロンプト（編集可能）
-                            </Label>
-                            <RefinementArea
-                                initialContent={promptText}
-                                contextData={{
-                                    tool: "line-banner",
-                                    toolName: "LINEバナー生成",
-                                    analysis: analysisResult,
-                                    bannerInfo: bannerInfo
-                                }}
-                                onContentUpdate={(newContent) => setPromptText(newContent)}
-                                contentType="text"
-                            />
-                            <p className="text-xs text-muted-foreground">※ここを詳しく書き換えることで、生成される画像のデザインを細かく制御できます。</p>
-                        </div>
-
-                        <div className="flex gap-4">
-                            <Button variant="ghost" onClick={() => setStep(1)}>
-                                <ArrowLeft className="w-4 h-4 mr-2" /> 戻る
-                            </Button>
-                            <Button className="flex-1" onClick={handleGenerate} disabled={isPending}>
-                                {isPending ? <Loader2 className="animate-spin mr-2" /> : <Wand2 className="w-4 h-4 mr-2" />}
-                                バナーを生成する（1枚）
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            )
-            }
-
-            {/* STEP 3: Generation Result */}
-            {
-                step === 3 && (
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>生成結果</CardTitle>
-                            <CardDescription>生成されたバナーデザイン案です。</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            {generatedImages.length > 0 && (
-                                <div className="flex flex-col items-center space-y-6">
-                                    <div className="relative group rounded-xl overflow-hidden shadow-2xl ring-1 ring-border/50 max-w-4xl w-full">
-                                        <div className="aspect-square bg-muted">
-                                            <img
-                                                src={generatedImages[0].image}
-                                                alt="生成されたバナー"
-                                                className="w-full h-full object-cover"
-                                            />
-                                        </div>
-                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
-                                    </div>
-
-                                    <Button
-                                        size="lg"
-                                        className="w-full max-w-sm shadow-lg text-base"
-                                        onClick={() => {
-                                            const a = document.createElement('a');
-                                            a.href = generatedImages[0].image;
-                                            a.download = `banner-${Date.now()}.png`;
-                                            a.click();
-                                            toast({ title: "ダウンロード開始", description: "間もなく保存されます" });
-                                        }}
-                                    >
-                                        <Download className="w-5 h-5 mr-2" />
-                                        画像を保存する
-                                    </Button>
-                                    <p className="text-sm text-muted-foreground">{generatedImages[0].description}</p>
-                                </div>
-                            )}
-
-                            {/* Interactive Refinement Section */}
-                            <div className="border-t pt-6 space-y-4">
-                                <p className="text-sm font-medium">🔄 修正したい場合は下に指示を入力してください</p>
-
-                                {refinementHistory.length > 0 && (
-                                    <div className="bg-muted p-3 rounded text-xs space-y-1">
-                                        <p className="font-bold">📝 過去の修正指示:</p>
-                                        {refinementHistory.map((r, i) => (
-                                            <p key={i} className="text-muted-foreground">• {r}</p>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="flex gap-2">
-                                    <Input
-                                        id="refinement-input-line"
-                                        placeholder="例: 背景をもう少しシンプルにして"
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                const input = e.currentTarget.value;
-                                                if (!input.trim()) return;
-                                                e.currentTarget.value = '';
-                                                handleRefinement(input);
-                                            }
-                                        }}
-                                    />
-                                    <Button
-                                        variant="default"
-                                        disabled={isPending}
-                                        onClick={() => {
-                                            const inputEl = document.getElementById('refinement-input-line') as HTMLInputElement;
-                                            const input = inputEl?.value || '';
-                                            if (!input.trim()) {
-                                                toast({ title: "修正指示を入力してください", variant: "destructive" });
-                                                return;
-                                            }
-                                            inputEl.value = '';
-                                            handleRefinement(input);
-                                        }}
-                                    >
-                                        {isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <Wand2 className="w-4 h-4" />}
-                                        <span className="ml-2">再生成</span>
-                                    </Button>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-center gap-4 mt-8">
-                                <Button variant="outline" onClick={() => setStep(2)}>
-                                    <ArrowLeft className="w-4 h-4 mr-2" /> プロンプト全体を編集
-                                </Button>
-                                <Button variant="ghost" onClick={() => {
-                                    setStep(1);
-                                    setGeneratedImages([]);
-                                    setPromptText("");
-                                    setRefinementHistory([]);
-                                }}>
-                                    <Sparkles className="w-4 h-4 mr-2" />
-                                    新しく作る
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )
-            }
-        </div >
+                    </div>
+                </div>
+            )}
+        </div>
     );
 }

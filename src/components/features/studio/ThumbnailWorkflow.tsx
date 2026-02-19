@@ -27,7 +27,8 @@ interface ThumbnailWorkflowProps {
 
 interface WorkflowState {
     step: number;
-    videoTitle: string;
+    step: number;
+    // videoTitle removed
     videoDescription: string;
     selectedThumbnails: ChannelThumbnail[];
     patternAnalysis: PatternAnalysisResult | null;
@@ -58,7 +59,8 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
     // Workflow State
     const [workflow, setWorkflow] = useState<WorkflowState>({
         step: 1,
-        videoTitle: "",
+        step: 1,
+        // videoTitle removed
         videoDescription: "",
         selectedThumbnails: [],
         patternAnalysis: null,
@@ -137,7 +139,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 // Auto-generate model images with reference thumbnails
                 const modelRes = await generateModelImages(
                     res.data.patterns,
-                    workflow.videoTitle,
+                    // videoTitle removed
                     workflow.videoDescription,
                     urls, // Pass all selected thumbnail URLs for reference
                     workflow.text // Pass input text for model generation
@@ -224,7 +226,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
             const res = await generateFinalThumbnails(
                 selectedModel,
                 workflow.text,
-                workflow.videoTitle,
+                // videoTitle removed
                 1, // Only 1 image requested
                 patternData,
                 referenceUrls,
@@ -257,7 +259,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
 
                     if (uploadedArtifacts.length > 0) {
                         const saveResult = await saveCreation(
-                            `サムネイル: ${workflow.videoTitle}`,
+                            `サムネイル: ${workflow.text.substring(0, 20)}...`, // Use text as title
                             'thumbnail',
                             uploadedArtifacts
                         );
@@ -304,7 +306,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                     const res = await generateFinalThumbnails(
                         selectedModel,
                         workflow.text,
-                        workflow.videoTitle,
+                        // videoTitle removed
                         1,
                         patternData,
                         referenceUrls,
@@ -348,7 +350,8 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
     const reset = () => {
         setWorkflow({
             step: 1,
-            videoTitle: "",
+            step: 1,
+            // videoTitle removed
             videoDescription: "",
             selectedThumbnails: [],
             patternAnalysis: null,
@@ -438,21 +441,13 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                         <CardTitle className="flex items-start md:items-center gap-2">
                             <Type className="w-5 h-5 shrink-0 mt-1 md:mt-0" />
                             <span>
-                                Step 1: 動画タイトル・<br className="md:hidden" />
-                                サムネイル文言を入力
+                                Step 1: サムネイル文言を入力
                             </span>
                         </CardTitle>
-                        <CardDescription>サムネイルを作成したい動画の情報と、サムネイルに入れたい文言を入力してください</CardDescription>
+                        <CardDescription>サムネイルに入れたい文言を入力してください</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                        <div className="space-y-2">
-                            <label className="text-sm font-semibold text-foreground">動画タイトル <span className="text-red-500">*</span></label>
-                            <Input
-                                value={workflow.videoTitle}
-                                onChange={(e) => setWorkflow(prev => ({ ...prev, videoTitle: e.target.value }))}
-                                placeholder="例：【衝撃】〇〇を試したら驚きの結果に..."
-                            />
-                        </div>
+
                         <div className="space-y-2">
                             <label className="text-sm font-semibold text-foreground">サムネイル文言（テロップ） <span className="text-red-500">*</span></label>
                             <Textarea
@@ -475,7 +470,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                         <div className="flex justify-end pt-2">
                             <Button
                                 onClick={() => goToStep(2)}
-                                disabled={!workflow.videoTitle.trim() || !workflow.text.trim()}
+                                disabled={!workflow.text.trim()}
                             >
                                 次へ <ArrowRight className="w-4 h-4 ml-2" />
                             </Button>
@@ -749,7 +744,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                                         contextData={{
                                             tool: "thumbnail",
                                             toolName: "サムネイル生成",
-                                            title: workflow.videoTitle,
+                                            // title removed
                                             description: workflow.videoDescription,
                                             pattern: selectedModel?.patternName
                                         }}

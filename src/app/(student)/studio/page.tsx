@@ -28,6 +28,7 @@ import { RefinementArea } from "@/components/features/studio/RefinementArea";
 import { ThemeCustomizer } from "@/components/ui/ThemeCustomizer";
 import { LPWorkflow } from "@/components/features/studio/LPWorkflow";
 import { VSLWorkflow } from "@/components/features/studio/VSLWorkflow";
+import { VideoClipWorkflow } from "@/components/features/studio/VideoClipWorkflow";
 
 
 // Student用許可ツール（この3つのみ）
@@ -35,6 +36,7 @@ const STUDENT_ALLOWED_TOOLS = [
     "/studio/thumbnail",    // YouTubeサムネイル
     "/studio/seo",          // SEO記事
     "/studio/script",       // YouTube台本
+    "/studio/social-post",  // X・Threads投稿
 ];
 
 // Admin用許可ツール（全部）
@@ -601,8 +603,14 @@ export default function AIStudioPage() {
                     </div>
                 )}
 
+                {activeTool === "/studio/video-clip" && (
+                    <div className="max-w-6xl mx-auto">
+                        <VideoClipWorkflow />
+                    </div>
+                )}
+
                 {/* Generic Tools (Eyecatch, Insta Story, etc.) */}
-                {!["/studio/thumbnail", "/studio/script", "/studio/seo", "/studio/short-script", "/studio/social-post", "/studio/note-writing", "/studio/sales-letter", "/studio/lp-writing", "/studio/vsl-writing", "/studio/line-banner", "/studio/note-thumbnail", "/studio/eyecatch-prompt", "/studio/insta-story"].includes(activeTool) && (
+                {!["/studio/thumbnail", "/studio/script", "/studio/seo", "/studio/short-script", "/studio/social-post", "/studio/note-writing", "/studio/sales-letter", "/studio/lp-writing", "/studio/vsl-writing", "/studio/line-banner", "/studio/note-thumbnail", "/studio/eyecatch-prompt", "/studio/insta-story", "/studio/video-clip"].includes(activeTool) && (
                     <div className="max-w-4xl mx-auto space-y-6">
                         {/* Header */}
                         <div className="flex items-center gap-4">

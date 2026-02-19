@@ -322,7 +322,7 @@ ${JSON.stringify(individualAnalysis, null, 2)}
 // ------------------------------------------------------------------
 export async function generateModelImages(
     patterns: PatternCategory[],
-    videoTitle: string,
+    // videoTitle removed
     videoDescription?: string,
     thumbnailUrls?: string[],
     text?: string
@@ -397,7 +397,6 @@ export async function generateModelImages(
             const prompt = `YouTubeサムネイルのモデル画像を生成。
 
 【動画情報】
-タイトル: ${videoTitle}
 ${videoDescription ? `内容: ${videoDescription}` : ''}
 
 【このパターンの特徴: ${pattern.name}】
@@ -427,7 +426,8 @@ ${pattern.description}
             }
 
             // Generate suggestions (Materials & Text)
-            const suggestionPrompt = `動画タイトル「${videoTitle}」のサムネイル（${pattern.name}パターン）の必要素材と文言を提案してください。
+            const suggestionPrompt = `動画のサムネイル（${pattern.name}パターン）の必要素材と文言を提案してください。
+ ${text ? `テロップ: ${text}` : ''}
 
             必ず以下のJSON形式のみで回答してください（説明文は不要）:
             {
@@ -497,7 +497,7 @@ ${pattern.description}
 export async function generateFinalThumbnails(
     modelImage: ModelImageInfo | null,
     text: string,
-    videoTitle: string,
+    // videoTitle removed
     count: number = 1,
     patternData?: PatternCategory,
     referenceUrls?: string[],
@@ -722,7 +722,7 @@ ${customPrompt ? `\n[CRITICAL: USER OVERRIDE INSTRUCTIONS]\nThe following instru
 export async function generateSingleModelImage(
     patterns: PatternCategory, // Changed locally to match singular call, but if called with array, handle appropriately? 
     // Wait, typical usage: generateSingleModelImage(pattern, ...)
-    videoTitle: string,
+    // videoTitle removed
     videoDescription: string = "",
     thumbnailUrls: string[] = [],
     customText: string = ""
@@ -741,12 +741,12 @@ export async function generateSingleModelImage(
 // Or actually implement it:
 export async function generateSingleModelImageCompatible(
     pattern: PatternCategory,
-    videoTitle: string,
+    // videoTitle removed
     videoDescription: string = "",
     thumbnailUrls: string[] = [],
     customText: string = ""
 ): Promise<{ data?: ModelImageInfo; error?: string }> {
-    const res = await generateModelImages([pattern], videoTitle, videoDescription, thumbnailUrls);
+    const res = await generateModelImages([pattern], videoDescription, thumbnailUrls);
     if (res.data && res.data.length > 0) {
         return { data: res.data[0] };
     }
