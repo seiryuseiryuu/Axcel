@@ -3,27 +3,26 @@
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Sparkles, Video, Users, ListChecks, FileText, Check, Scissors, ClipboardCopy } from "lucide-react";
+import { Loader2, Sparkles, Check, ClipboardCopy, FileText, Scissors, Clock, PenTool } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
-import {
-    analyzeVideoTranscript,
-    extractHighlights,
-    proposeClips,
-    generateEditInstructions
-} from "@/app/actions/videoClip";
-import { RefinementArea } from "@/components/features/studio/RefinementArea";
+import { correctSubtitles, extractClipCandidates } from "@/app/actions/videoClip";
 
 const STEPS = [
-    { num: 1, title: "動画入力", icon: Video },
-    { num: 2, title: "目的設定", icon: Users },
-    { num: 3, title: "ハイライト抽出", icon: Sparkles },
-    { num: 4, title: "クリップ提案", icon: Scissors },
-    { num: 5, title: "編集指示書", icon: FileText },
+    { num: 1, title: "字幕入力", icon: PenTool },
+    { num: 2, title: "字幕校正", icon: FileText },
+    { num: 3, title: "尺の選択", icon: Clock },
+    { num: 4, title: "切り抜き候補", icon: Scissors },
+];
+
+const CLIP_LENGTHS = [
+    { value: 30, label: "30秒" },
+    { value: 45, label: "45秒" },
+    { value: 60, label: "60秒" },
+    { value: 90, label: "90秒" },
+    { value: 120, label: "120秒" },
 ];
 
 export function VideoClipWorkflow() {
@@ -31,86 +30,52 @@ export function VideoClipWorkflow() {
     const [isPending, startTransition] = useTransition();
     const [step, setStep] = useState(1);
 
-    // Inputs
-    const [videoUrl, setVideoUrl] = useState("");
-    const [platform, setPlatform] = useState("shorts");
-    const [purpose, setPurpose] = useState("バイラル狙い");
-    const [targetAudience, setTargetAudience] = useState("");
-    const [clipCount, setClipCount] = useState(5);
-    const [maxLength, setMaxLength] = useState(60);
+    // Data
+    const [rawSubtitles, setRawSubtitles] = useState("");
+    const [correctedSubtitles, setCorrectedSubtitles] = useState("");
+    const [selectedLength, setSelectedLength] = useState<number | null>(null);
+    const [clipCandidates, setClipCandidates] = useState("");
 
-    // Results
-    const [videoTitle, setVideoTitle] = useState("");
-    const [transcript, setTranscript] = useState("");
-    const [highlights, setHighlights] = useState("");
-    const [clipProposals, setClipProposals] = useState("");
-    const [editInstructions, setEditInstructions] = useState("");
-
-    const handleFetchTranscript = () => {
-        if (!videoUrl) {
-            toast({ title: "動画URLを入力してください", variant: "destructive" });
+    // STEP 1 → 2: Correct subtitles
+    const handleCorrectSubtitles = () => {
+        if (!rawSubtitles.trim()) {
+            toast({ title: "字幕を入力してください", variant: "destructive" });
             return;
         }
         startTransition(async () => {
-            const result = await analyzeVideoTranscript(videoUrl);
+            const result = await correctSubtitles(rawSubtitles);
             if (result.success && result.data) {
-                setVideoTitle(result.data.title);
-                setTranscript(result.data.transcript);
+                setCorrectedSubtitles(result.data);
                 setStep(2);
-                toast({ title: "取得完了", description: `「${result.data.title}」の字幕を取得しました` });
+                toast({ title: "校正完了", description: "誤字脱字を修正しました" });
             } else {
                 toast({ title: "エラー", description: result.error, variant: "destructive" });
             }
         });
     };
 
-    const handleExtractHighlights = () => {
+    // STEP 3 → 4: Extract clip candidates
+    const handleExtractClips = () => {
+        if (!selectedLength) {
+            toast({ title: "尺を選択してください", variant: "destructive" });
+            return;
+        }
         startTransition(async () => {
-            const result = await extractHighlights(
-                transcript, videoTitle, purpose, targetAudience, maxLength, clipCount
-            );
+            const result = await extractClipCandidates(correctedSubtitles, selectedLength);
             if (result.success && result.data) {
-                setHighlights(result.data);
-                setStep(3);
-                toast({ title: "分析完了", description: "ハイライトポイントを抽出しました" });
-            } else {
-                toast({ title: "エラー", description: result.error, variant: "destructive" });
-            }
-        });
-    };
-
-    const handleProposeClips = () => {
-        startTransition(async () => {
-            const result = await proposeClips(
-                highlights, videoTitle, platform, purpose, targetAudience, maxLength, clipCount
-            );
-            if (result.success && result.data) {
-                setClipProposals(result.data);
-                setStep(4);
-                toast({ title: "提案完了", description: `${clipCount}本のクリップを提案しました` });
-            } else {
-                toast({ title: "エラー", description: result.error, variant: "destructive" });
-            }
-        });
-    };
-
-    const handleGenerateEditInstructions = () => {
-        startTransition(async () => {
-            const result = await generateEditInstructions(clipProposals, videoTitle, platform);
-            if (result.success && result.data) {
-                setEditInstructions(result.data);
+                setClipCandidates(result.data);
 
                 // Save to History
                 import("@/app/actions/history").then(({ saveCreation }) => {
                     saveCreation(
-                        `動画切り抜き: ${videoTitle.slice(0, 30)}...`,
+                        `動画切り抜き分析: ${selectedLength}秒`,
                         'video_script',
-                        { editInstructions: result.data, videoTitle, platform }
+                        { clipCandidates: result.data, selectedLength }
                     ).catch(e => console.error("History save failed", e));
                 });
 
-                setStep(5);
-                toast({ title: "完了", description: "編集指示書を作成しました。履歴に保存されました。" });
+                setStep(4);
+                toast({ title: "抽出完了", description: "切り抜き候補を抽出しました" });
             } else {
                 toast({ title: "エラー", description: result.error, variant: "destructive" });
             }
@@ -132,189 +97,143 @@ export function VideoClipWorkflow() {
                 ))}
             </div>
 
-            {/* STEP 1: Video Input */}
+            {/* STEP 1: Subtitle Input */}
             <div className={step === 1 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
                 <Card>
                     <CardHeader>
-                        <CardTitle>STEP 1: 動画の入力</CardTitle>
-                        <CardDescription>切り抜きたい長尺動画のYouTube URLを入力してください。</CardDescription>
+                        <CardTitle>STEP 1: タイムコード付き字幕の入力</CardTitle>
+                        <CardDescription>
+                            YouTubeの字幕（タイムスタンプ付き）または文字起こしツールで取得した字幕を貼り付けてください。
+                        </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-6">
+                    <CardContent className="space-y-4">
                         <div className="space-y-2">
-                            <Label>YouTube動画URL<span className="text-red-500">*</span></Label>
-                            <Input
-                                placeholder="https://www.youtube.com/watch?v=..."
-                                value={videoUrl}
-                                onChange={e => setVideoUrl(e.target.value)}
+                            <Label>タイムコード付き字幕<span className="text-red-500">*</span></Label>
+                            <Textarea
+                                placeholder={`例:\n00:00:00 皆さんこんにちは、今日は副業について話していきたいと思います。\n00:00:05 まず最初に、なぜ今副業が必要なのかという話なんですけど...\n00:00:12 実は日本の平均年収というのは...\n\n※YouTubeの字幕やWhisperなどの文字起こしツールの出力をそのまま貼り付けてください。`}
+                                value={rawSubtitles}
+                                onChange={e => setRawSubtitles(e.target.value)}
+                                className="min-h-[300px] font-mono text-sm"
                             />
-                            <p className="text-xs text-muted-foreground">※字幕（トランスクリプト）が取得可能な動画を指定してください。</p>
+                            <div className="text-xs text-muted-foreground space-y-1">
+                                <p>※ YouTubeの字幕（トランスクリプト）からコピー&ペーストできます。</p>
+                                <p>※ Whisper等の文字起こしツールの出力も使用できます。</p>
+                                <p>※ タイムコードのフォーマットは問いません（HH:MM:SS、MM:SS、秒数など）。</p>
+                            </div>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label>投稿先プラットフォーム</Label>
-                            <Select value={platform} onValueChange={setPlatform}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="tiktok">TikTok（15〜60秒）</SelectItem>
-                                    <SelectItem value="shorts">YouTube Shorts（60秒以内）</SelectItem>
-                                    <SelectItem value="reels">Instagram Reels（15〜90秒）</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <Button className="w-full" size="lg" onClick={handleFetchTranscript} disabled={isPending}>
-                            {isPending ? <Loader2 className="animate-spin mr-2" /> : <Video className="mr-2" />}
-                            動画を取得・分析開始
+                        <Button className="w-full" size="lg" onClick={handleCorrectSubtitles} disabled={isPending}>
+                            {isPending ? <Loader2 className="animate-spin mr-2" /> : <Sparkles className="mr-2" />}
+                            字幕を校正する
                         </Button>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* STEP 2: Purpose & Target */}
+            {/* STEP 2: Corrected Subtitles */}
             <div className={step === 2 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
                 <Card>
                     <CardHeader>
-                        <CardTitle>STEP 2: 切り抜き目的の設定</CardTitle>
-                        <CardDescription>「{videoTitle}」の字幕を取得しました。切り抜きの目的を設定してください。</CardDescription>
+                        <CardTitle>STEP 2: 校正済み字幕の確認</CardTitle>
+                        <CardDescription>
+                            誤字脱字を修正しました。タイムコードは変更されていません。内容を確認して次へ進んでください。
+                        </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-6">
-                        <div className="p-3 bg-muted/30 rounded-lg border text-sm">
-                            <p className="font-medium mb-1">取得した字幕:</p>
-                            <p className="text-muted-foreground line-clamp-3">{transcript.slice(0, 200)}...</p>
-                            <p className="text-xs text-muted-foreground mt-1">（{transcript.length.toLocaleString()}文字）</p>
-                        </div>
-
+                    <CardContent className="space-y-4">
                         <div className="space-y-2">
-                            <Label>切り抜きの目的</Label>
-                            <Select value={purpose} onValueChange={setPurpose}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="チャンネル認知拡大">チャンネル認知拡大</SelectItem>
-                                    <SelectItem value="バイラル狙い">バイラル狙い</SelectItem>
-                                    <SelectItem value="教育・学びのシェア">教育・学びのシェア</SelectItem>
-                                    <SelectItem value="エンタメ・笑い">エンタメ・笑い</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label>ターゲット層（任意）</Label>
-                            <Input
-                                placeholder="例：20代の副業に興味がある会社員"
-                                value={targetAudience}
-                                onChange={e => setTargetAudience(e.target.value)}
+                            <Label>校正済みタイムコード付き字幕</Label>
+                            <Textarea
+                                value={correctedSubtitles}
+                                onChange={e => setCorrectedSubtitles(e.target.value)}
+                                className="min-h-[300px] font-mono text-sm bg-background"
                             />
+                            <p className="text-xs text-muted-foreground">※ 必要に応じて手動で修正も可能です。</p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>希望クリップ数</Label>
-                                <Select value={String(clipCount)} onValueChange={v => setClipCount(Number(v))}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="3">3本</SelectItem>
-                                        <SelectItem value="5">5本</SelectItem>
-                                        <SelectItem value="7">7本</SelectItem>
-                                        <SelectItem value="10">10本</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>最大長さ（秒）</Label>
-                                <Select value={String(maxLength)} onValueChange={v => setMaxLength(Number(v))}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="15">15秒</SelectItem>
-                                        <SelectItem value="30">30秒</SelectItem>
-                                        <SelectItem value="60">60秒</SelectItem>
-                                        <SelectItem value="90">90秒</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                        <div className="flex gap-4">
+                            <Button variant="outline" className="flex-1" onClick={() => setStep(1)}>
+                                戻る
+                            </Button>
+                            <Button className="flex-1" onClick={() => setStep(3)}>
+                                次へ（尺の選択）
+                            </Button>
                         </div>
-
-                        <Button className="w-full" size="lg" onClick={handleExtractHighlights} disabled={isPending}>
-                            {isPending ? <Loader2 className="animate-spin mr-2" /> : <Sparkles className="mr-2" />}
-                            ハイライトを抽出
-                        </Button>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* STEP 3: Highlights */}
+            {/* STEP 3: Select Clip Length */}
             <div className={step === 3 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
                 <Card>
                     <CardHeader>
-                        <CardTitle>STEP 3: ハイライト分析結果</CardTitle>
-                        <CardDescription>バズる可能性の高いポイントを抽出しました。</CardDescription>
+                        <CardTitle>STEP 3: 切り抜きの希望尺を選択</CardTitle>
+                        <CardDescription>
+                            切り抜きたいショート動画の長さを選択してください。選択した尺±10秒程度で候補を抽出します。
+                        </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="bg-muted/30 p-4 rounded-lg border max-h-[500px] overflow-y-auto">
-                            <MarkdownRenderer content={highlights} />
+                    <CardContent className="space-y-6">
+                        <div className="grid grid-cols-5 gap-3">
+                            {CLIP_LENGTHS.map((len) => (
+                                <Button
+                                    key={len.value}
+                                    variant={selectedLength === len.value ? "default" : "outline"}
+                                    className={`h-20 text-lg font-bold flex flex-col gap-1 transition-all ${selectedLength === len.value
+                                            ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105"
+                                            : "hover:scale-105"
+                                        }`}
+                                    onClick={() => setSelectedLength(len.value)}
+                                >
+                                    <Clock className="w-5 h-5" />
+                                    {len.label}
+                                </Button>
+                            ))}
                         </div>
-                        <Button className="w-full" onClick={handleProposeClips} disabled={isPending}>
-                            {isPending ? <Loader2 className="animate-spin mr-2" /> : <Scissors className="mr-2" />}
-                            次へ（クリップ提案）
-                        </Button>
+
+                        {selectedLength && (
+                            <p className="text-sm text-center text-muted-foreground">
+                                {selectedLength - 10}秒〜{selectedLength + 10}秒の範囲で切り抜き候補を検索します。
+                            </p>
+                        )}
+
+                        <div className="flex gap-4">
+                            <Button variant="outline" className="flex-1" onClick={() => setStep(2)}>
+                                戻る
+                            </Button>
+                            <Button
+                                className="flex-1"
+                                onClick={handleExtractClips}
+                                disabled={isPending || !selectedLength}
+                            >
+                                {isPending ? <Loader2 className="animate-spin mr-2" /> : <Scissors className="mr-2" />}
+                                切り抜き候補を抽出
+                            </Button>
+                        </div>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* STEP 4: Clip Proposals */}
+            {/* STEP 4: Clip Candidates */}
             <div className={step === 4 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
                 <Card>
                     <CardHeader>
-                        <CardTitle>STEP 4: 切り抜きクリップ提案</CardTitle>
-                        <CardDescription>{clipCount}本のクリップを提案しました。確認して編集指示書を作成してください。</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="bg-muted/30 p-4 rounded-lg border max-h-[600px] overflow-y-auto">
-                            <MarkdownRenderer content={clipProposals} />
-                        </div>
-                        <Button className="w-full" onClick={handleGenerateEditInstructions} disabled={isPending}>
-                            {isPending ? <Loader2 className="animate-spin mr-2" /> : <FileText className="mr-2" />}
-                            編集指示書を作成
-                        </Button>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* STEP 5: Edit Instructions */}
-            <div className={step === 5 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>編集指示書完成</CardTitle>
-                        <CardDescription>編集指示書をもとに動画を編集してください。</CardDescription>
+                        <CardTitle>STEP 4: 切り抜き候補一覧</CardTitle>
+                        <CardDescription>
+                            {selectedLength}秒（±10秒）の条件に合致する切り抜き候補です。タイムコードと開始・終了セリフを確認してください。
+                        </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="bg-background p-6 rounded-lg border shadow-sm prose prose-sm max-w-none dark:prose-invert">
-                            <MarkdownRenderer content={editInstructions} />
+                            <MarkdownRenderer content={clipCandidates} />
                         </div>
 
-                        <RefinementArea
-                            initialContent={editInstructions}
-                            contextData={{
-                                videoTitle,
-                                platform,
-                                purpose,
-                                highlights,
-                                clips: clipProposals
-                            }}
-                            onContentUpdate={(newContent) => setEditInstructions(newContent)}
-                            contentType="script"
-                        />
-
                         <div className="flex gap-4">
-                            <Button variant="outline" className="flex-1" onClick={() => setStep(1)}>トップへ戻る</Button>
-                            <Button className="flex-1" onClick={() => navigator.clipboard.writeText(editInstructions)}>
+                            <Button variant="outline" className="flex-1" onClick={() => setStep(3)}>
+                                尺を変えて再抽出
+                            </Button>
+                            <Button variant="outline" className="flex-1" onClick={() => setStep(1)}>
+                                最初に戻る
+                            </Button>
+                            <Button className="flex-1" onClick={() => navigator.clipboard.writeText(clipCandidates)}>
                                 <ClipboardCopy className="mr-2 w-4 h-4" />
                                 コピー
                             </Button>

@@ -1,219 +1,86 @@
 "use server";
 
 import { generateText } from "@/lib/gemini";
-import { fetchVideoData } from "@/lib/youtube";
 
-// --- VIDEO CLIP ACTIONS ---
+// --- STEP 2: Correct typos in timestamped subtitles ---
+export async function correctSubtitles(rawSubtitles: string) {
+    const prompt = `あなたはプロの文字起こし校正者です。
+以下のタイムコード付き字幕の誤字脱字・変換ミスを修正してください。
 
-export async function analyzeVideoTranscript(url: string) {
-    const videoData = await fetchVideoData(url);
-    if (!videoData.success) {
-        return { success: false, error: videoData.error || "動画データの取得に失敗しました" };
-    }
+【重要ルール】
+1. **タイムコードは絶対に変更しないでください。** 元のタイムスタンプをそのまま維持してください。
+2. 明らかな誤字・脱字・変換ミスのみを修正してください。
+3. 発言の意味や内容は一切変えないでください。
+4. 口語表現はそのまま残してください（話し言葉を書き言葉に直さない）。
+5. 出力は入力と同じタイムコード付きフォーマットで返してください。
 
-    const { title, description, transcript, hasTranscript } = videoData.data;
+【入力字幕】
+${rawSubtitles}
 
-    if (!hasTranscript) {
-        return { success: false, error: "動画の字幕（トランスクリプト）が取得できませんでした。字幕のある動画URLを指定してください。" };
-    }
-
-    return {
-        success: true,
-        data: {
-            title,
-            description,
-            transcript: transcript.slice(0, 80000),
-        }
-    };
-}
-
-export async function extractHighlights(
-    transcript: string,
-    videoTitle: string,
-    purpose: string,
-    targetAudience: string,
-    maxLength: number,
-    clipCount: number
-) {
-    const prompt = `あなたはバイラルコンテンツの専門家です。
-以下の長尺動画のトランスクリプトを分析し、ショート動画として切り抜いた場合にバズる可能性が高いポイントを特定してください。
-
-【動画タイトル】
-${videoTitle}
-
-【トランスクリプト全文】
-${transcript}
-
-【切り抜きの目的】
-${purpose}
-
-【ターゲット層】
-${targetAudience || "幅広い層"}
-
-【最大長さ】
-${maxLength}秒以内
-
-## 分析指示
-以下の4つの観点でハイライトを自動抽出してください：
-1. **感情のピーク**（驚き/笑い/感動）- 視聴者の感情が大きく動く瞬間
-2. **価値提供**（学び/気づき）- 「これは知らなかった！」と思わせる瞬間
-3. **議論喚起**（コメントが集まりそう）- 意見が分かれるような発言
-4. **シェア衝動**（誰かに伝えたくなる）- 思わず共有したくなる内容
-
-## 出力フォーマット（Markdown）
-
-# ハイライト分析結果
-
-## 動画全体の傾向
-- **テーマ**: (動画の主なテーマ)
-- **トーン**: (真面目/エンタメ/教育的 等)
-- **盛り上がりのパターン**: (どこで感情が動いているか)
-
-## 検出されたハイライトポイント
-各ハイライトについて以下を記載：
-
-| # | タイムスタンプ(推定) | カテゴリ | バイラル度 | 内容要約 |
-|---|---|---|---|---|
-| 1 | XX:XX - XX:XX | 感情のピーク | ★★★★★ | ... |
-| 2 | ... | ... | ... | ... |
-
-※トランスクリプトの位置から時間を推定してください。
-`;
+【出力】
+修正後のタイムコード付き字幕をそのまま出力してください。フォーマットは入力と同じにしてください。
+修正箇所がある場合は、最後に「---修正箇所---」として修正した箇所のリストを記載してください。
+修正箇所がない場合は「修正箇所なし」と記載してください。`;
 
     try {
-        const result = await generateText(prompt, 0.4);
+        const result = await generateText(prompt, 0.2);
         return { success: true, data: result };
     } catch (e: any) {
-        return { success: false, error: e.message || "ハイライト抽出エラー" };
+        return { success: false, error: e.message || "字幕校正エラー" };
     }
 }
 
-export async function proposeClips(
-    highlights: string,
-    videoTitle: string,
-    platform: string,
-    purpose: string,
-    targetAudience: string,
-    maxLength: number,
-    clipCount: number
+// --- STEP 4: Extract clip candidates ---
+export async function extractClipCandidates(
+    correctedSubtitles: string,
+    clipLengthSeconds: number
 ) {
-    const platformSpecs: Record<string, string> = {
-        tiktok: "TikTok（15〜60秒、縦型9:16）",
-        shorts: "YouTube Shorts（60秒以内、縦型9:16）",
-        reels: "Instagram Reels（15〜90秒、縦型9:16）"
-    };
+    const minLength = clipLengthSeconds - 10;
+    const maxLength = clipLengthSeconds + 10;
 
-    const prompt = `あなたはショート動画のプロデューサーです。
-ハイライト分析結果を元に、最もバズる可能性が高い切り抜きクリップを${clipCount}本提案してください。
+    const prompt = `あなたはYouTube動画の切り抜き編集のプロフェッショナルです。
+以下のタイムコード付き字幕から、ショート動画として切り抜ける箇所を **全て** 抽出してください。
 
-【動画タイトル】
-${videoTitle}
+【タイムコード付き字幕】
+${correctedSubtitles}
 
-【ハイライト分析】
-${highlights}
+【希望尺】
+${clipLengthSeconds}秒（±10秒、つまり${minLength}秒〜${maxLength}秒の範囲）
 
-【投稿先プラットフォーム】
-${platformSpecs[platform] || platform}
+【切り抜き条件（3つ全てを満たすこと）】
+1. **テーマの完結性**: ある特定のテーマについて話していて、内容のまとまりとして完結していること。話の途中で切れたり、前後の文脈がないと意味が通じないものはNG。
+2. **初見理解性**: 初見の視聴者にとっても内容が理解できること。前提知識や前の話題を知らないと意味が分からないものはNG。
+3. **尺の適合性**: 切り抜き箇所の長さが${minLength}秒〜${maxLength}秒程度であること。
 
-【切り抜きの目的】
-${purpose}
+【出力フォーマット】
+条件にマッチする該当箇所を **全て** 以下の形式で出力してください。
+該当箇所がない場合は「条件に合致する切り抜き箇所は見つかりませんでした」と出力してください。
 
-【ターゲット層】
-${targetAudience || "幅広い層"}
+---
 
-【最大長さ】
-${maxLength}秒以内
+## 切り抜き候補 1
+- **開始タイムコード**: (例: 00:02:15)
+- **終了タイムコード**: (例: 00:03:10)
+- **推定尺**: (例: 55秒)
+- **開始セリフ**: 「(切り抜き開始位置のセリフをそのまま記載)」
+- **終了セリフ**: 「(切り抜き終了位置のセリフをそのまま記載)」
+- **テーマ**: (この切り抜きで話しているテーマを一言で)
+- **内容要約**: (2〜3行で内容を要約)
 
-## 提案指示
-各クリップについて、以下の情報を含めてください：
+## 切り抜き候補 2
+...
 
-## 出力フォーマット（Markdown）
+---
 
-# 切り抜きクリップ提案（${clipCount}本）
-
-${Array.from({ length: clipCount }, (_, i) => `
-## クリップ ${i + 1}
-
-### 基本情報
-- **バイラル度**: ★★★★★（5段階評価）
-- **推定再生数**: XX万回
-- **タイムスタンプ**: XX:XX - XX:XX
-- **長さ**: XX秒
-
-### コンテンツ
-- **タイトル案**: (${platformSpecs[platform] || platform}に最適化)
-- **キャプション案**: (ハッシュタグ付き)
-- **選定理由**: (なぜこのクリップがバズるのか)
-
-### 編集指示
-- **フック（冒頭3秒）**: (視聴者を引き留める最初の一言/シーン)
-- **テロップ案**: (入れるべき字幕テキスト)
-- **BGM提案**: (雰囲気に合うBGMジャンル)
-- **エフェクト**: (推奨する視覚効果)
-`).join("\n")}
-`;
+【注意事項】
+- タイムコードは字幕データから正確に引用してください。推測や丸めはしないでください。
+- 開始セリフ・終了セリフは、ユーザーが切り抜き箇所を正確に把握できるよう、実際のセリフをそのまま記載してください。
+- 条件を満たす箇所は漏れなく全て出力してください。`;
 
     try {
-        const result = await generateText(prompt, 0.5);
+        const result = await generateText(prompt, 0.3);
         return { success: true, data: result };
     } catch (e: any) {
-        return { success: false, error: e.message || "クリップ提案エラー" };
-    }
-}
-
-export async function generateEditInstructions(
-    selectedClips: string,
-    videoTitle: string,
-    platform: string
-) {
-    const prompt = `あなたは動画編集ディレクターです。
-選択されたクリップの詳細な編集指示書を作成してください。
-
-【動画タイトル】
-${videoTitle}
-
-【選択されたクリップ】
-${selectedClips}
-
-【プラットフォーム】
-${platform}
-
-## 指示
-各クリップについて、実際に編集作業を行うための詳細なタイムライン指示書を作成してください。
-
-## 出力フォーマット（Markdown）
-
-# 編集指示書
-
-## 共通設定
-- **アスペクト比**: 9:16（縦型）
-- **解像度**: 1080 x 1920
-- **フレームレート**: 30fps
-
-## クリップ別編集タイムライン
-
-### クリップ 1
-| 秒数 | 映像 | テロップ | 音声/BGM | エフェクト |
-|---:|:---|:---|:---|:---|
-| 0-3 | フック映像 | 「衝撃の一言」 | ドラマチックBGM Start | ズームイン |
-| 3-10 | ... | ... | ... | ... |
-| ... | ... | ... | ... | ... |
-
-### 字幕スタイル指定
-- フォント: (推奨フォント)
-- サイズ: (推奨サイズ)
-- 色: (推奨色)
-- 位置: (画面のどこに配置)
-
-### サムネイル案
-- メインビジュアル案
-- テキスト案
-`;
-
-    try {
-        const result = await generateText(prompt, 0.5);
-        return { success: true, data: result };
-    } catch (e: any) {
-        return { success: false, error: e.message || "編集指示書エラー" };
+        return { success: false, error: e.message || "切り抜き抽出エラー" };
     }
 }
