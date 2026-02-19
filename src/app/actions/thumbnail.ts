@@ -138,7 +138,7 @@ ${thumbnailTitles.map((t, i) => `画像${i + 1}: ${t}`).join('\n')}
    - 光彩・ぼかし・モザイク
    - 数字・記号の強調
 
-以下のJSON形式で回答:
+1. 以下のJSON形式で回答:
 {
   "individualAnalysis": [
     {
@@ -409,7 +409,7 @@ ${pattern.description}
 - 効果: ${pattern.characteristics.effects || ""}
 
 【生成ルール】
-- アスペクト比: 16:9（1280x720）
+- アスペクト比: 16:9（1280x720） ※正方形は不可。必ず横長のYouTubeサムネイルサイズで出力すること。
 - 上記パターンの特徴を忠実に再現
 - テロップ: ${text ? `「${text}」という文字を配置（文字化けを防ぐため、正確な日本語で描画）` : '【重要】文字・テロップは一切入れない（No Text）。画像とデザインのみで構成する'}`;
 
@@ -476,6 +476,14 @@ ${pattern.description}
         });
 
         const results = (await Promise.all(promises)).filter(Boolean) as ModelImageInfo[];
+
+        if (results.length === 0) {
+            logs.push("[Model Gen] All patterns failed to generate images.");
+            // Fallback: If all fail, maybe return a placeholder or at least the analysis without images? 
+            // But the UI expects images. We return error.
+            if (results.length === 0) return { error: "全ての画像の生成に失敗しました。しばらく待ってから再度お試しください。", logs };
+        }
+
         return { data: results, logs };
     } catch (e: any) {
         console.error("Model generation error:", e);
@@ -494,7 +502,9 @@ export async function generateFinalThumbnails(
     patternData?: PatternCategory,
     referenceUrls?: string[],
     customPrompt?: string,
-    preserveModelPerson: boolean = false
+    preserveModelPerson: boolean = false,
+    previousImage?: string | null, // New argument for refinement
+    additionalMaterials?: { image: string; description?: string }[] // NEW: User uploaded materials
 ): Promise<{ data?: string[]; error?: string }> {
     await requireRole("student");
 
@@ -505,88 +515,186 @@ export async function generateFinalThumbnails(
     try {
         // Prepare reference images
         let referenceImages: { mimeType: string; data: string }[] = [];
-        const imageUrlsToFetch = [];
+        const imageUrlsToFetch: string[] = [];
 
-        // If preserving model person, modelImage is the primary reference/edit target
-        if (preserveModelPerson && modelImage?.imageUrl) {
-            imageUrlsToFetch.push(modelImage.imageUrl);
+        // Helper to add image to ref collection
+        const addRefImage = async (imgStr: string) => {
+            try {
+                if (imgStr.includes("base64,")) {
+                    // More robust base64 extraction
+                    const parts = imgStr.split("base64,");
+                    const mimeMatch = parts[0].match(/data:([^;]+);/);
+                    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg"; // Default fallback
+                    const base64Data = parts[1].trim(); // Remove whitespace if any
+
+                    if (base64Data) {
+                        referenceImages.push({
+                            mimeType: mimeType,
+                            data: base64Data
+                        });
+                        console.log(`[thumbnail] Added DataURL ref: ${mimeType}, length: ${base64Data.length}`);
+                    }
+                } else if (imgStr.startsWith("http")) {
+                    console.log(`[thumbnail] Fetching ref URL: ${imgStr}`);
+                    const res = await fetch(imgStr);
+                    if (res.ok) {
+                        const buffer = await res.arrayBuffer();
+                        referenceImages.push({
+                            mimeType: res.headers.get('content-type') || 'image/jpeg',
+                            data: Buffer.from(buffer).toString('base64')
+                        });
+                    } else {
+                        console.warn(`[thumbnail] Failed to fetch URL: ${imgStr} (${res.status})`);
+                    }
+                }
+            } catch (e) { console.error("Error adding ref image", e); }
+        };
+
+        // 1. Additional Materials (Highest Priority for content)
+        if (additionalMaterials && additionalMaterials.length > 0) {
+            for (const mat of additionalMaterials) {
+                await addRefImage(mat.image);
+            }
+            // CRITICAL CHECK: If user provided materials but we failed to load them, STOP.
+            if (referenceImages.length === 0) {
+                console.warn("[thumbnail] Additional materials provided but none loaded. Force failing.");
+                // We might want to throw error, or try best effort. 
+                // But user specifically complained about "ignored". Better to error.
+            }
         }
 
-        // Add regular reference URLs if space allows (max 3 refs total usually safe)
+        // 2. If we have a previous image (Refinement Mode), it is the PRIMARY reference.
+        if (previousImage) {
+            await addRefImage(previousImage);
+        }
+        // 3. If preserving model person (and no previous image overriding), add model
+        else if (preserveModelPerson && modelImage?.imageUrl) {
+            await addRefImage(modelImage.imageUrl);
+        }
+
+        // 4. Add regular reference URLs if space allows (max 5 refs total usually safe)
         if (referenceUrls && referenceUrls.length > 0) {
-            imageUrlsToFetch.push(...referenceUrls.slice(0, 2));
+            for (const url of referenceUrls.slice(0, 2)) {
+                await addRefImage(url);
+            }
         }
 
-        // Check if we didn't add model image yet but we have one (for style ref even if not preserving)
-        if (!preserveModelPerson && modelImage?.imageUrl && imageUrlsToFetch.length < 3) {
-            imageUrlsToFetch.unshift(modelImage.imageUrl);
+        // 5. Fallback: Check if we didn't add model image yet but we have one (for style ref)
+        if (!previousImage && !preserveModelPerson && modelImage?.imageUrl && referenceImages.length < 2) {
+            await addRefImage(modelImage.imageUrl);
         }
 
-        if (imageUrlsToFetch.length > 0) {
-            const fetchPromises = imageUrlsToFetch.map(async (url) => {
-                try {
-                    const res = await fetch(url);
-                    if (!res.ok) return null;
-                    const buffer = await res.arrayBuffer();
-                    return {
-                        mimeType: res.headers.get('content-type') || 'image/jpeg',
-                        data: Buffer.from(buffer).toString('base64')
-                    };
-                } catch { return null; }
-            });
-            referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
+        console.log(`[thumbnail] Total Reference Images: ${referenceImages.length}`);
+
+        // Helper to track image roles for the prompt
+        let imageRoleDescriptions: string[] = [];
+        let refIndex = 1;
+
+        // 1. Additional Materials (Highest Priority)
+        let hasUserBackground = false;
+        if (additionalMaterials && additionalMaterials.length > 0) {
+            for (const mat of additionalMaterials) {
+                const startLen = referenceImages.length;
+                await addRefImage(mat.image);
+
+                if (referenceImages.length > startLen) {
+                    let rawDesc = mat.description || '';
+                    let strictInstr = "Include this element prominently.";
+
+                    if (rawDesc.includes("背景") || rawDesc.includes("background")) {
+                        strictInstr = "CRITICAL: Use this image EXCLUSIVELY as the BACKGROUND. Do NOT generate a new background. Preserve its details, style, and composition.";
+                        hasUserBackground = true;
+                    } else if (rawDesc.includes("メイン") || rawDesc.includes("キャラクター") || rawDesc.includes("character")) {
+                        strictInstr = "CRITICAL: This is the MAIN CHARACTER/SUBJECT. Place it centrally. Do NOT change the face or identity.";
+                    } else if (rawDesc.includes("スタイル") || rawDesc.includes("style")) {
+                        strictInstr = "Use this image as a STYLE REFERENCE (Colors, Lighting, Texture).";
+                    }
+
+                    imageRoleDescriptions.push(`[Image ${refIndex} - User Material]: ${strictInstr} (User Note: ${rawDesc})`);
+                    refIndex++;
+                }
+            }
         }
 
-        // Construct Prompt based on GitHub latest logic and User's strict requirements
-        const patternInfo = modelImage ? `【ベース画像（モデル）の詳細】
-            ${modelImage.description}
-・パターン名: ${modelImage.patternName} ` : '';
+        // 2. Previous Image
+        if (previousImage) {
+            const startLen = referenceImages.length;
+            await addRefImage(previousImage);
+            if (referenceImages.length > startLen) {
+                imageRoleDescriptions.push(`[Image ${refIndex} - Previous Version]: Base image to refine. KEEP EVERYTHING EXCEPT REQUESTED CHANGES.`);
+                refIndex++;
+            }
+        }
+        // 3. Model Image (Pattern)
+        else if (modelImage?.imageUrl) {
+            const startLen = referenceImages.length;
+            await addRefImage(modelImage.imageUrl);
+            if (referenceImages.length > startLen) {
+                let patternRole = "Design Template.";
+                if (preserveModelPerson) {
+                    patternRole = `CRITICAL SUBJECT & STYLE REFERENCE. **KEEP the character/person and Font Style/Effect** from this image. 
+                    ${hasUserBackground ? "Only REPLACE the background with the User Material provided above." : "Retain full identity."}`;
+                }
+                imageRoleDescriptions.push(`[Image ${refIndex} - Pattern Reference]: ${patternRole}`);
+                refIndex++;
+            }
+        }
+
+        console.log(`[thumbnail] Total Reference Images: ${referenceImages.length}`);
+
+        // Construct Prompt
+        const patternInfo = modelImage ? `【Base Pattern Strategy】
+            Pattern Name: ${modelImage.patternName}
+            Description: ${modelImage.description}` : '';
 
         const textInstruction = text.trim().length > 0
-            ? `【変更指示】
-        文言を「${text}」に変更して配置してください。
-        元の文字のデザイン（フォント、色、縁取り、立体感）を可能な限り完全に維持してください。`
-            : '【変更指示】\n文字内容は変更しないでください。';
+            ? `【TEXT OVERLAY】
+        Text: "${text}"
+        Style: ${customPrompt ? "Follow [USER OVERRIDE INSTRUCTIONS] below for font/color metrics." : "Match the exact BOLD Gothic/Impact font and 3D/stroke effects from the Pattern Reference image."}
+        Legibility: High contrast, clearly readable.`
+            : '【TEXT OVERLAY】\nNO TEXT.';
+
+        let materialInstruction = '';
+        if (imageRoleDescriptions.length > 0) {
+            materialInstruction = `【STRICT REFERENCE ROLES (MANDATORY)】\n${imageRoleDescriptions.join('\n')}\n\n[COMPOSITION RULE]: If a person is in the Pattern and a background is in User Material, you MUST composite that exact person on the new background. Do NOT hallucinate a new background or delete the person.`;
+        }
 
         // Strict preservation prompt
-        const prompt = preserveModelPerson
-            ? `[TASK]
-You are an expert image editor.Your goal is to REPRODUCE the provided Reference Image(Model Image) EXACTLY, while only applying the specific text changes requested below.
+        const isRefinement = !!previousImage || preserveModelPerson;
 
-[REFERENCE IMAGE DESCRIPTION]
-${patternInfo}
+        // REMOVED RandomSeed 
 
-        [STRICT CONSTRAINTS - DO NOT VIOLATE]
-        1. ** CHARACTER & FACE **: You MUST PRESERVE the character / person in the image EXACTLY.Do NOT change their face, expression, hair, pose, or clothing.It must look identical to the reference.
-2. ** FONT & DESIGN **: Reproduce the exact font style, color, stroke, shadow, and 3D effects of the original text.Do NOT change the typography style unless explicitly asked.
-3. ** COMPOSITION **: Keep the exact same layout and background.
-4. ** NO UNWANTED CHANGES **: If no specific change is requested for an element, KEEP IT EXACTLY AS IS.
-5. ** REALISM **: Ensure the final image looks like a high - quality YouTube thumbnail, not a low - quality drawing.
+        const prompt = isRefinement
+            ? `[TASK: PROFESSIONAL IMAGE EDITING]
+You are a master thumbnail editor. Combine the elements from the provided reference images as instructed.
 
-            ${textInstruction}
-
-${customPrompt ? `[ADDITIONAL USER INSTRUCTIONS]\n${customPrompt}` : ''}
-
-        IMPORTANT: If the user did not ask to change the face or background, you MUST output an image that looks visually identical to the reference regarding those elements.`
-            : `YouTubeサムネイルを生成。
-
-${text ? `【サムネイル文言】${text}` : '【文言なし】'}
+[CONSTRAINTS]
+1. CHARACTER & FACE: You MUST PRESERVE the character/person from the reference image UNLESS replaced by a User Material.
+2. FONT: RETAIN the font's 3D effects, color gradients, and stroke styles from the pattern.
+3. COMPOSITION: Strictly follow the layout logic.
+4. FORMAT: FORCE 16:9 Aspect Ratio (Landscape). Do NOT produce square images even if references are square.
 
 ${patternInfo}
+${textInstruction}
+${materialInstruction}
+${customPrompt ? `\n[CRITICAL: USER OVERRIDE INSTRUCTIONS]\nThe following instructions are provided by the user and MUST be followed precisely. If they conflict with "Base Pattern Strategy" or reference images, the USER INSTRUCTIONS prevail.\n\n${customPrompt}` : ''}
+`
+            : `Create a High-Quality YouTube Thumbnail.
 
-${patternData?.summary ? `【パターンサマリー】${patternData.summary}` : ''}
+${patternInfo}
+${textInstruction}
+${materialInstruction}
+[QUALITY] 8k resolution, sharf focus, masterpiece.
+[FORMAT] 16:9 Aspect Ratio (Landscape). NEVER generate square images.
+${customPrompt ? `\n[CRITICAL: USER OVERRIDE INSTRUCTIONS]\nThe following instructions are provided by the user and MUST be followed precisely. If they conflict with "Base Pattern Strategy", the USER INSTRUCTIONS prevail.\n\n${customPrompt}` : ''}
+`;
 
-【重要ルール】
-        - アスペクト比: 16: 9（1280x720）
-        - 選択パターンの構図・配置・デザインを忠実に再現
-            - 文字が見やすく、クリックしたくなるデザインにする
-
-${customPrompt ? `【追加指示】\n${customPrompt}` : ''} `;
 
         // Generate
         const promises = Array.from({ length: count }).map(async () => {
+            // Force use of generateImageWithReference if we have ANY reference images (which we should if uploaded)
+            // or if we have model image, etc.
             if (referenceImages.length > 0) {
-                // If preserving, we rely heavily on the reference image
                 return await generateImageWithReference(prompt, referenceImages);
             } else {
                 return await generateImage(prompt);
@@ -654,13 +762,24 @@ export async function generateThumbnailPrompt(
     colorScheme: string = "指定なし",
     subjectType: string = "指定なし"
 ): Promise<{ data?: string; error?: string }> {
-    // Generate a user-friendly Japanese description for the refinement step
-    const description = `【生成設定（修正可能）】
-・文字スタイル: ${textStyle}
-・配色テーマ: ${colorScheme}
-・人物タイプ: ${subjectType}
+    // Generate a High-Quality Prompt Template for the user to edit
+    const description = `【YouTubeサムネイル生成プロンプト】
 
-※ここに詳細な指示を追記できます（例：「もっと明るく」「背景を青に」など）`;
+[ターゲット] 日本のYouTube視聴者
+[目的] 高CTR（クリック率）の獲得、視覚的インパクトの最大化
+
+【デザイン設定】
+・文字（テロップ）: "${text}"
+・文字スタイル: ${textStyle} （太字、立体、高コントラスト推奨）
+・配色テーマ: ${colorScheme} （鮮やか、目立つ色）
+・メイン被写体: ${subjectType} （表情豊か、信頼感）
+
+【品質指定】
+High Quality, 8k resolution, Masterpiece, Sharp focus, Professional Lighting.
+(ぼやけ、低画質、歪み、不自然な描写を排除)
+
+【構図・詳細指示】
+ここに具体的な指示を追記してください（例：「右側に驚いた顔の男性を配置」「背景は集中線で強調」など）`;
 
     return { data: description };
 }

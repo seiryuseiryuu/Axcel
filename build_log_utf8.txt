@@ -1,0 +1,92 @@
+﻿
+> skillplus@0.1.0 build
+> next build --webpack
+
+node.exe : [baseline-b
+rowser-mapping] The da
+ta in this module is o
+ver two months old.  T
+o ensure accurate Base
+line data, please upda
+te: `npm i baseline-br
+owser-mapping@latest -
+D`
+発生場所 行:1 文字:1
++ & "C:\Program Files\
+nodejs/node.exe" "C:\P
+rogram Files\nodejs/no
+de_mo ...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: ([baseline-   
+ brows...ping@late    
+st -D`:String) []    ,
+ RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+   笆ｲ Next.js 16.0.7 (webpack)
+   - Environments: .env.local
+   - Experiments (use with caution):
+     ﾂｷ serverActions
+
+ 笞 The "middleware" f
+ile convention is depr
+ecated. Please use "pr
+oxy" instead. Learn mo
+re: https://nextjs.org
+/docs/messages/middlew
+are-to-proxy
+   Creating an optimized production build ...
+> [PWA] Compile server
+> [PWA] Compile server
+> [PWA] Compile client (static)
+> [PWA] Auto register service worker with: C:\Users\ookaw\Desktop\skillplus\node_modules\next-pwa\register.js
+> [PWA] Service worker: C:\Users\ookaw\Desktop\skillplus\public\sw.js
+> [PWA]   url: /sw.js
+> [PWA]   scope: /
+Failed to compile.
+
+./src/components/featu
+res/studio/ThumbnailWo
+rkflow.tsx
+Error:   [31mx[0m Ex
+pected '}', got '<eof>
+'
+     ,-[[36;1;4mC:\Us
+ers\ookaw\Desktop\skil
+lplus\src\components\f
+eatures\studio\Thumbna
+ilWorkflow.tsx[0m:896
+:1]
+ [2m893[0m |        
+         )}
+ [2m894[0m |        
+     </div>
+ [2m895[0m |        
+ );
+ [2m896[0m |     }
+     : [35;1m     ^[
+0m
+ [2m897[0m | 
+     `----
+
+Caused by:
+    Syntax Error
+
+Import trace for reque
+sted module:
+./src/components/featu
+res/studio/ThumbnailWo
+rkflow.tsx
+./src/app/(student)/st
+udio/page.tsx
+
+
+> Build failed because
+ of webpack errors

@@ -10,10 +10,16 @@ import {
     BookText, Video, Image, Cpu, ImagePlus, FileVideo,
     Twitter, Instagram, Presentation, MessageSquare, FileText,
     Mail, Layout, MonitorPlay, Package, GitBranch, Scissors,
-    ChevronLeft, ChevronRight, Palette, Sparkles, Home, LogOut, Clock
+    ChevronLeft, ChevronRight, Palette, Sparkles, Home, LogOut, Clock, Menu
 } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { useToast } from "@/hooks/use-toast";
+
+import {
+    Sheet,
+    SheetContent,
+    SheetTrigger,
+} from "@/components/ui/sheet";
 
 interface ToolItem {
     title: string;
@@ -30,6 +36,8 @@ const tools: ToolItem[] = [
     { title: "SEO記事作成", href: "/studio/seo", icon: BookText, category: "content" },
     { title: "YouTube台本", href: "/studio/script", icon: Video, category: "content" },
     { title: "ショート動画台本", href: "/studio/short-script", icon: FileVideo, category: "content" },
+    { title: "VSLライティング", href: "/studio/vsl-writing", icon: MonitorPlay, category: "content", isNew: true },
+    { title: "動画切り抜き分析", href: "/studio/video-clip", icon: Scissors, category: "content", isNew: true },
     { title: "X・Threads投稿", href: "/studio/social-post", icon: Twitter, category: "content" },
     { title: "note文章", href: "/studio/note-writing", icon: FileText, category: "content" },
     { title: "セールスレター", href: "/studio/sales-letter", icon: Mail, category: "content" },
@@ -61,6 +69,7 @@ interface StudioToolSidebarProps {
 export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAdmin }: StudioToolSidebarProps) {
     const [collapsed, setCollapsed] = useState(false);
     const { toast } = useToast();
+    const [isOpen, setIsOpen] = useState(false);
 
     // Show all tools, but mark non-allowed ones as "coming soon" for non-admins
     const displayTools = tools.map(t => ({
@@ -74,14 +83,12 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
         displayTools.some(t => t.category === c.id)
     );
 
-    return (
-        <div className={cn(
-            "border-r border-border/40 bg-background/95 backdrop-blur-xl flex flex-col transition-all duration-300 rounded-l-xl shadow-sm z-50",
-            collapsed ? "w-16" : "w-64"
-        )}>
+    // Common Sidebar Content
+    const SidebarContent = ({ isMobile = false }: { isMobile?: boolean }) => (
+        <div className="flex flex-col h-full bg-background/95 backdrop-blur-xl">
             {/* Header */}
             <div className="p-4 border-b border-border/40 flex items-center justify-between">
-                {!collapsed && (
+                {(!collapsed || isMobile) && (
                     <div className="flex items-center gap-2">
                         <div className="p-1.5 bg-primary/10 rounded-md">
                             <Sparkles className="h-4 w-4 text-primary" />
@@ -89,14 +96,16 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                         <span className="font-bold text-sm tracking-tight">Accel</span>
                     </div>
                 )}
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 hover:bg-muted"
-                    onClick={() => setCollapsed(!collapsed)}
-                >
-                    {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-                </Button>
+                {!isMobile && (
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 hover:bg-muted"
+                        onClick={() => setCollapsed(!collapsed)}
+                    >
+                        {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                    </Button>
+                )}
             </div>
 
             {/* Tools List */}
@@ -104,7 +113,7 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                 <div className="p-3 space-y-6">
                     {activeCategories.map((category) => (
                         <div key={category.id}>
-                            {!collapsed && (
+                            {(!collapsed || isMobile) && (
                                 <div className="px-3 py-2 text-[11px] font-bold text-muted-foreground/70 uppercase tracking-wider flex items-center gap-2">
                                     <category.icon className="w-3 h-3 opacity-70" />
                                     {category.label}
@@ -121,9 +130,9 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                                                 variant="ghost"
                                                 className={cn(
                                                     "w-full justify-start h-10 text-sm transition-all duration-200 text-muted-foreground hover:text-foreground",
-                                                    collapsed && "justify-center px-0"
+                                                    (collapsed && !isMobile) && "justify-center px-0"
                                                 )}
-                                                title={collapsed ? tool.title : undefined}
+                                                title={(collapsed && !isMobile) ? tool.title : undefined}
                                                 onClick={(e) => {
                                                     e.preventDefault();
                                                     toast({
@@ -134,9 +143,9 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                                             >
                                                 <tool.icon className={cn(
                                                     "h-4 w-4 flex-shrink-0 transition-colors mr-3 opacity-70",
-                                                    collapsed && "mr-0"
+                                                    (collapsed && !isMobile) && "mr-0"
                                                 )} />
-                                                {!collapsed && (
+                                                {(!collapsed || isMobile) && (
                                                     <span className="truncate flex-1 text-left flex items-center justify-between">
                                                         {tool.title}
                                                         <span className="text-[9px] bg-muted-foreground/20 px-1.5 py-0.5 rounded text-muted-foreground ml-2">
@@ -154,20 +163,25 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                                             variant="ghost"
                                             className={cn(
                                                 "w-full justify-start h-10 text-sm transition-all duration-200",
-                                                collapsed && "justify-center px-0",
+                                                (collapsed && !isMobile) && "justify-center px-0",
                                                 isActive
                                                     ? "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 font-medium"
                                                     : "hover:bg-muted text-foreground/80 hover:text-foreground"
                                             )}
-                                            title={collapsed ? tool.title : undefined}
-                                            onClick={() => onToolChange(tool.href)}
+                                            title={(collapsed && !isMobile) ? tool.title : undefined}
+                                            onClick={() => {
+                                                onToolChange(tool.href);
+                                                if (isMobile) {
+                                                    setIsOpen(false);
+                                                }
+                                            }}
                                         >
                                             <tool.icon className={cn(
                                                 "h-4 w-4 flex-shrink-0 transition-colors",
-                                                collapsed ? "mr-0" : "mr-3",
+                                                (collapsed && !isMobile) ? "mr-0" : "mr-3",
                                                 isActive ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground"
                                             )} />
-                                            {!collapsed && (
+                                            {(!collapsed || isMobile) && (
                                                 <span className="truncate flex-1 text-left flex items-center justify-between">
                                                     {tool.title}
                                                     {tool.isNew && (
@@ -194,12 +208,12 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                             variant="ghost"
                             className={cn(
                                 "w-full justify-start h-8 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50",
-                                collapsed && "justify-center px-2"
+                                (collapsed && !isMobile) && "justify-center px-2"
                             )}
                             title="ユーザー管理"
                         >
                             <Home className="h-3.5 w-3.5 flex-shrink-0" />
-                            {!collapsed && <span className="ml-2">ユーザー管理</span>}
+                            {(!collapsed || isMobile) && <span className="ml-2">ユーザー管理</span>}
                         </Button>
                     </Link>
                 )}
@@ -209,17 +223,17 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                         variant="ghost"
                         className={cn(
                             "w-full justify-start h-8 text-xs text-muted-foreground hover:text-foreground hover:bg-muted",
-                            collapsed && "justify-center px-2"
+                            (collapsed && !isMobile) && "justify-center px-2"
                         )}
                         title="ログアウト"
                         type="submit"
                     >
                         <LogOut className="h-3.5 w-3.5 flex-shrink-0" />
-                        {!collapsed && <span className="ml-2">ログアウト</span>}
+                        {(!collapsed || isMobile) && <span className="ml-2">ログアウト</span>}
                     </Button>
                 </form>
 
-                {!collapsed && (
+                {(!collapsed || isMobile) && (
                     <div className="text-[10px] text-muted-foreground text-center pt-1">
                         {displayTools.filter((t: typeof tools[number]) => !t.comingSoon).length}個の利用可能AIツール
                     </div>
@@ -233,16 +247,45 @@ export function StudioToolSidebar({ activeTool, onToolChange, allowedTools, isAd
                         variant="ghost"
                         className={cn(
                             "w-full justify-start h-10 text-sm transition-all duration-200 hover:bg-muted font-medium text-foreground/80",
-                            collapsed && "justify-center px-0"
+                            (collapsed && !isMobile) && "justify-center px-0"
                         )}
                         title="生成履歴"
+                        onClick={() => {
+                            if (isMobile) setIsOpen(false);
+                        }}
                     >
-                        <Clock className={cn("h-4 w-4 flex-shrink-0 mr-3", collapsed && "mr-0")} />
-                        {!collapsed && <span>生成履歴</span>}
+                        <Clock className={cn("h-4 w-4 flex-shrink-0 mr-3", (collapsed && !isMobile) && "mr-0")} />
+                        {(!collapsed || isMobile) && <span>生成履歴</span>}
                     </Button>
                 </Link>
             </div>
         </div>
+    );
+
+    return (
+        <>
+            {/* Desktop Sidebar (Left Fixed) - Hidden on Mobile */}
+            <div className={cn(
+                "hidden md:flex flex-col border-r border-border/40 bg-background/95 backdrop-blur-xl transition-all duration-300 rounded-l-xl shadow-sm z-50 h-[calc(100vh-2rem)] my-4 ml-4",
+                collapsed ? "w-16" : "w-64"
+            )}>
+                <SidebarContent />
+            </div>
+
+            {/* Mobile Trigger (Floating Hamburger) - Visible only on Mobile */}
+            <div className="md:hidden fixed bottom-4 left-4 z-50">
+                <Sheet open={isOpen} onOpenChange={setIsOpen}>
+                    <SheetTrigger asChild>
+                        <Button variant="outline" size="icon" className="rounded-full shadow-lg bg-background/80 backdrop-blur-md border-primary/20">
+                            <Menu className="h-5 w-5" />
+                        </Button>
+                    </SheetTrigger>
+                    <SheetContent side="left" className="p-0 w-[280px]">
+                        <SidebarContent isMobile={true} />
+                    </SheetContent>
+                </Sheet>
+            </div>
+        </>
     );
 }
 

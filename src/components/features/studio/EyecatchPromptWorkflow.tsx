@@ -299,7 +299,7 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                         >
                             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             <ImageIcon className="mr-2 h-4 w-4" />
-                            {state.mediaUrl ? "抽出＆スタイル分析" : "画像説明を抽出"}
+                            {state.mediaUrl ? "抽出＆分析" : "画像説明を抽出"}
                             <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>
                     </CardContent>
@@ -418,46 +418,57 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                             </Select>
                         </div>
 
-                        {/* Extracted Eyecatches */}
+                        {/* Extracted Eyecatches (Table View) */}
                         <div className="space-y-2">
                             <Label>抽出された画像説明（{selectedIndices.length}/{state.extractedEyecatches.length}件選択中）</Label>
-                            <div className="border rounded-lg divide-y max-h-[400px] overflow-y-auto">
-                                {state.extractedEyecatches.map((eyecatch) => (
-                                    <div
-                                        key={eyecatch.index}
-                                        className={`p-4 hover:bg-muted/50 cursor-pointer ${selectedIndices.includes(eyecatch.index) ? 'bg-primary/5' : ''}`}
-                                        onClick={() => toggleSelection(eyecatch.index)}
-                                    >
-                                        <div className="flex items-start gap-3">
-                                            <Checkbox
-                                                checked={selectedIndices.includes(eyecatch.index)}
-                                                onCheckedChange={() => toggleSelection(eyecatch.index)}
-                                            />
-                                            <div className="flex-1 space-y-1">
-                                                <div className="flex items-center gap-2">
+                            <div className="border rounded-lg overflow-hidden">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b">
+                                        <tr>
+                                            <th className="px-4 py-3 w-[50px]">選択</th>
+                                            <th className="px-4 py-3 w-[80px]">No.</th>
+                                            <th className="px-4 py-3 w-[150px]">セクション</th>
+                                            <th className="px-4 py-3">画像説明（AI抽出）</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {state.extractedEyecatches.map((eyecatch) => (
+                                            <tr
+                                                key={eyecatch.index}
+                                                className={`hover:bg-muted/50 cursor-pointer transition-colors ${selectedIndices.includes(eyecatch.index) ? 'bg-primary/5' : ''}`}
+                                                onClick={() => toggleSelection(eyecatch.index)}
+                                            >
+                                                <td className="px-4 py-3">
+                                                    <Checkbox
+                                                        checked={selectedIndices.includes(eyecatch.index)}
+                                                        onCheckedChange={() => toggleSelection(eyecatch.index)}
+                                                    />
+                                                </td>
+                                                <td className="px-4 py-3">
                                                     <Badge variant="secondary">#{eyecatch.index + 1}</Badge>
-                                                    {eyecatch.sectionTitle && (
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {eyecatch.sectionTitle}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <p className="text-sm font-medium">{eyecatch.description}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
+                                                </td>
+                                                <td className="px-4 py-3 text-muted-foreground">
+                                                    {eyecatch.sectionTitle || "-"}
+                                                </td>
+                                                <td className="px-4 py-3 font-medium">
+                                                    {eyecatch.description}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
 
-                        <div className="flex gap-2">
-                            <Button variant="outline" onClick={() => updateState({ step: 1 })}>
+                        <div className="flex flex-col md:flex-row gap-2">
+                            <Button variant="outline" onClick={() => updateState({ step: 1 })} className="w-full md:w-auto order-2 md:order-1">
                                 <ArrowLeft className="mr-2 h-4 w-4" />
                                 戻る
                             </Button>
                             <Button
                                 onClick={handleGenerate}
                                 disabled={loading || selectedIndices.length === 0}
+                                className="w-full md:w-auto order-1 md:order-2"
                             >
                                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                 <Sparkles className="mr-2 h-4 w-4" />
@@ -477,16 +488,19 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                             <div>
                                 <CardTitle className="flex items-center gap-2">
                                     <Sparkles className="h-5 w-5 text-green-500" />
-                                    Step 3: プロンプト完成！
+                                    Step 3: 高品質プロンプト生成完了
                                 </CardTitle>
                                 <CardDescription>
-                                    {state.generatedPrompts.length}件の画像生成AIプロンプトを作成しました
+                                    {state.generatedPrompts.length}件の高精細プロンプトを作成しました
                                 </CardDescription>
                             </div>
                             <Button variant="outline" size="sm" onClick={handleCopyAll}>
                                 <Copy className="h-4 w-4 mr-1" />
                                 すべてコピー
                             </Button>
+                        </div>
+                        <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-md mt-2">
+                            <strong>💡 ヒント:</strong> プロンプトは参考メディアのトンマナに合わせて日本語で出力されます。MidjourneyやStable Diffusionにそのまま貼り付けてご使用ください。
                         </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -549,12 +563,12 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                             </div>
                         ))}
 
-                        <div className="flex gap-2 pt-4">
-                            <Button variant="outline" onClick={() => updateState({ step: 2 })}>
+                        <div className="flex flex-col md:flex-row gap-2 pt-4">
+                            <Button variant="outline" onClick={() => updateState({ step: 2 })} className="w-full md:w-auto">
                                 <ArrowLeft className="mr-2 h-4 w-4" />
                                 スタイル選択に戻る
                             </Button>
-                            <Button variant="outline" onClick={handleReset}>
+                            <Button variant="outline" onClick={handleReset} className="w-full md:w-auto">
                                 新しいHTMLで作成
                             </Button>
                         </div>

@@ -27,6 +27,8 @@ const tools: ToolItem[] = [
     { title: "SEO記事作成", href: "/admin/studio/seo", icon: BookText, category: "content" },
     { title: "YouTube台本", href: "/admin/studio/script", icon: Video, category: "content" },
     { title: "ショート動画台本", href: "/admin/studio/short-script", icon: FileVideo, category: "content" },
+    { title: "VSLライティング", href: "/admin/studio/vsl-writing", icon: MonitorPlay, category: "content" },
+    { title: "動画切り抜き分析", href: "/admin/studio/video-clip", icon: Scissors, category: "content" },
     { title: "X・Threads投稿", href: "/admin/studio/social-post", icon: Twitter, category: "content" },
     { title: "note文章", href: "/admin/studio/note-writing", icon: FileText, category: "content" },
     { title: "LPライティング", href: "/admin/studio/lp-writing", icon: Layout, category: "content" },

@@ -137,10 +137,59 @@ ${readerAnalysis}
     }
 }
 
+// --- STEP 5: Improvement Proposals ---
+export async function analyzeNoteImprovement(
+    structureAnalysis: string,
+    deepAnalysis: string,
+    theme: string,
+    category: string
+) {
+    const categoryName = NOTE_CATEGORIES[category as keyof typeof NOTE_CATEGORIES] || category;
+
+    const prompt = `あなたは敏腕編集者です。
+分析した「参考記事の構造」と「売れる要素」を元に、今回作成する記事（テーマ：${theme}）をさらに良くするための改善案を提案してください。
+
+【参考記事の構造】
+${structureAnalysis}
+
+【詳細分析】
+${deepAnalysis}
+
+## 提案指示
+参考記事の良さを取り入れつつ、今回のテーマ「${theme}」に合わせて、
+「追加すべき要素」と「削除・変更すべき要素」を具体的に提案してください。
+カテゴリ「${categoryName}」に適した構成にブラッシュアップすることが目的です。
+
+## 出力フォーマット（Markdown）
+
+# 構成改善・ブラッシュアップ案
+
+## 1. 構成の調整（Add/Delete）
+- **[追加]**: (例：初心者向けの用語解説セクションを追加すべき)
+- **[削除]**: (例：個人的な長すぎるエピソードは短縮・カット)
+
+## 2. オリジナリティの付加
+- 競合と差別化するために、どのような「独自の視点」や「体験」を入れるべきか？
+
+## 3. 推奨する最終記事構成案（目次イメージ）
+1. ...
+2. ...
+3. ...
+`;
+
+    try {
+        const result = await generateText(prompt, 0.6);
+        return { success: true, data: result };
+    } catch (e: any) {
+        return { success: false, error: e.message || "改善提案エラー" };
+    }
+}
+
 export async function writeNoteArticle(
     structure: string,
     reader: string,
     deepAnalysis: string,
+    improvement: string, // Added argument
     inputData: { type: string; category: string; theme: string; target?: string }
 ) {
     const categoryName = NOTE_CATEGORIES[inputData.category as keyof typeof NOTE_CATEGORIES] || inputData.category;
@@ -161,7 +210,11 @@ ${structure}
 【読者心理】
 ${reader}
 
+【改善・構成案（これを最優先）】
+${improvement}
+
 ## 執筆指示
+- **【重要】「改善・構成案」で提案された最終構成に従って執筆してください。**
 - noteらしい「親しみやすさ」「体温のある文章」で書いてください。
 - Markdown形式で見出し、太字、リストを活用してください。
 - 記事の最後には「スキ」や「フォロー」を促す文言を入れてください。

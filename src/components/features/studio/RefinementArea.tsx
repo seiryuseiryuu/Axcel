@@ -15,9 +15,12 @@ interface RefinementAreaProps {
     contextData: any;
     onContentUpdate: (newContent: string) => void;
     contentType?: 'text' | 'script' | 'html';
+    onRegenerate?: (newContent?: string) => Promise<void>; // Updated to accept new content
+    isRegenerating?: boolean; // External loading state
 }
 
-export function RefinementArea({ initialContent, contextData, onContentUpdate, contentType = 'text' }: RefinementAreaProps) {
+
+export function RefinementArea({ initialContent, contextData, onContentUpdate, contentType = 'text', onRegenerate, isRegenerating }: RefinementAreaProps) {
     const { toast } = useToast();
     const [content, setContent] = useState(initialContent);
     const [instruction, setInstruction] = useState("");
@@ -27,24 +30,41 @@ export function RefinementArea({ initialContent, contextData, onContentUpdate, c
     const handleRefine = () => {
         if (!instruction.trim()) return;
 
-        // Add user instruction to local display history (optional UI enhancement)
+        // Add user instruction to local display history
         const newHistory = [...history, { role: 'user' as const, text: instruction }];
         setHistory(newHistory);
 
         startTransition(async () => {
+            // 1. Refine Content
+            // @ts-ignore
             const result = await refineContent(content, instruction, contextData, contentType);
 
             if (result.success && result.data) {
                 setContent(result.data);
                 onContentUpdate(result.data); // Propagate up
-                setHistory(prev => [...prev, { role: 'ai' as const, text: "修正しました。" }]);
                 setInstruction("");
-                toast({ title: "修正完了", description: "コンテンツを更新しました" });
+
+                // 2. Auto-Regenerate if callback provided
+                if (onRegenerate) {
+                    try {
+                        // Pass the NEW content directly to avoid stale state in parent
+                        await onRegenerate(result.data);
+                        setHistory(prev => [...prev, { role: 'ai' as const, text: "修正指示を反映して画像を再生成しました。" }]);
+                        toast({ title: "再生成完了", description: "新しいサムネイルが生成されました" });
+                    } catch (e) {
+                        setHistory(prev => [...prev, { role: 'ai' as const, text: "プロンプトは修正されましたが、画像の再生成に失敗しました。" }]);
+                        toast({ title: "再生成エラー", description: "画像の生成に失敗しました", variant: "destructive" });
+                    }
+                } else {
+                    setHistory(prev => [...prev, { role: 'ai' as const, text: "修正しました。" }]);
+                    toast({ title: "修正完了", description: "コンテンツを更新しました" });
+                }
             } else {
                 toast({ title: "エラー", description: "修正に失敗しました", variant: "destructive" });
             }
         });
     };
+
 
     return (
         <Card className="mt-8 border-primary/20 bg-primary/5">
@@ -128,7 +148,7 @@ export function RefinementArea({ initialContent, contextData, onContentUpdate, c
                     />
                     <Button
                         onClick={handleRefine}
-                        disabled={isPending || !instruction.trim()}
+                        disabled={isPending || isRegenerating || !instruction.trim()}
                         className="h-auto self-end px-6"
                     >
                         {isPending ? <Loader2 className="animate-spin" /> : <Send />}

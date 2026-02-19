@@ -133,6 +133,7 @@ export async function writeSalesLetter(
     structure: string,
     customer: string,
     deepAnalysis: string,
+    _improvement: string,
     productInfo: string
 ) {
     const prompt = `あなたは1本で1億円を売り上げる伝説のセールスコピーライターです。

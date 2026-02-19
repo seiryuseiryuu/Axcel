@@ -19,7 +19,8 @@ interface CopywritingSteps {
     analyzeStructure: (url: string, productInfo: string) => Promise<{ success: boolean; data?: string; error?: string }>;
     analyzeCustomer: (structure: string) => Promise<{ success: boolean; data?: string; error?: string }>;
     analyzeDeep: (structure: string, customer: string) => Promise<{ success: boolean; data?: string; error?: string }>;
-    generateCopy: (structure: string, customer: string, deepAnalysis: string, productInfo: string) => Promise<{ success: boolean; data?: string; error?: string }>;
+    analyzeImprovement?: (structure: string, deepAnalysis: string, productInfo: string) => Promise<{ success: boolean; data?: string; error?: string }>;
+    generateCopy: (structure: string, customer: string, deepAnalysis: string, improvement: string, productInfo: string) => Promise<{ success: boolean; data?: string; error?: string }>;
 }
 
 interface CopywritingWorkflowProps {
@@ -29,12 +30,21 @@ interface CopywritingWorkflowProps {
     defaultProductInfo?: string;
 }
 
-const STEPS = [
+const STEPS_5 = [
     { num: 1, title: "情報入力", icon: Link },
     { num: 2, title: "構成分解", icon: ListChecks },
     { num: 3, title: "顧客分析", icon: Users },
-    { num: 4, title: "詳細分析", icon: sparkIcon }, // sparkIcon is dummy, used Sparkles below
+    { num: 4, title: "詳細分析", icon: sparkIcon },
     { num: 5, title: "コピー生成", icon: FileText },
+];
+
+const STEPS_6 = [
+    { num: 1, title: "情報入力", icon: Link },
+    { num: 2, title: "構成分解", icon: ListChecks },
+    { num: 3, title: "顧客分析", icon: Users },
+    { num: 4, title: "詳細分析", icon: sparkIcon },
+    { num: 5, title: "改善提案", icon: ListChecks },
+    { num: 6, title: "コピー生成", icon: FileText },
 ];
 
 function sparkIcon(props: any) { return <Sparkles {...props} /> }
@@ -54,10 +64,14 @@ export function CopywritingWorkflow({ type, toolName, actions, defaultProductInf
         analyzeStructure: LpWritingActions.analyzeLpStructure,
         analyzeCustomer: LpWritingActions.analyzeLpCustomer,
         analyzeDeep: LpWritingActions.analyzeLpDeep,
+        analyzeImprovement: LpWritingActions.analyzeLpImprovement,
         generateCopy: LpWritingActions.writeLpCopy
     });
 
     const resolvedToolName = toolName || (type === "sales-letter" ? "セールスレター作成" : "LPライティング");
+    const hasImprovement = !!resolvedActions.analyzeImprovement;
+    const STEPS = hasImprovement ? STEPS_6 : STEPS_5;
+    const finalStepNum = hasImprovement ? 6 : 5;
 
     if (!resolvedActions.analyzeStructure) {
         return <div className="p-4 text-red-500">Error: Invalid configuration. Actions or Type must be provided.</div>;
@@ -71,6 +85,7 @@ export function CopywritingWorkflow({ type, toolName, actions, defaultProductInf
     const [structureAnalysis, setStructureAnalysis] = useState("");
     const [customerAnalysis, setCustomerAnalysis] = useState("");
     const [deepAnalysis, setDeepAnalysis] = useState("");
+    const [improvementAnalysis, setImprovementAnalysis] = useState("");
     const [finalCopy, setFinalCopy] = useState("");
 
     const handleAnalyzeStructure = () => {
@@ -116,9 +131,23 @@ export function CopywritingWorkflow({ type, toolName, actions, defaultProductInf
         });
     };
 
+    const handleAnalyzeImprovement = () => {
+        if (!resolvedActions.analyzeImprovement) return;
+        startTransition(async () => {
+            const result = await resolvedActions.analyzeImprovement!(structureAnalysis, deepAnalysis, productInfo);
+            if (result.success && result.data) {
+                setImprovementAnalysis(result.data);
+                toast({ title: "改善提案完了", description: "構成改善案を作成しました" });
+                setStep(5);
+            } else {
+                toast({ title: "エラー", description: result.error, variant: "destructive" });
+            }
+        });
+    };
+
     const handleGenerateCopy = () => {
         startTransition(async () => {
-            const result = await resolvedActions.generateCopy(structureAnalysis, customerAnalysis, deepAnalysis, productInfo);
+            const result = await resolvedActions.generateCopy(structureAnalysis, customerAnalysis, deepAnalysis, improvementAnalysis, productInfo);
             if (result.success && result.data) {
                 setFinalCopy(result.data);
 
@@ -126,13 +155,13 @@ export function CopywritingWorkflow({ type, toolName, actions, defaultProductInf
                 import("@/app/actions/history").then(({ saveCreation }) => {
                     saveCreation(
                         `${resolvedToolName}: ${productInfo.slice(0, 20)}...`,
-                        resolvedToolName.includes("LP") || resolvedToolName.includes("セールス") ? 'seo_article' : 'mixed', // Use seo_article as proxy for long text
+                        resolvedToolName.includes("LP") || resolvedToolName.includes("セールス") ? 'seo_article' : 'mixed',
                         { finalScript: result.data, structure: structureAnalysis }
                     ).catch(e => console.error("History save failed", e));
                 });
 
                 toast({ title: "コピー生成完了", description: "履歴に保存されました" });
-                setStep(5);
+                setStep(finalStepNum);
             } else {
                 toast({ title: "エラー", description: result.error, variant: "destructive" });
             }
@@ -236,16 +265,37 @@ export function CopywritingWorkflow({ type, toolName, actions, defaultProductInf
                         <div className="bg-muted/30 p-4 rounded-lg border max-h-[500px] overflow-y-auto">
                             <MarkdownRenderer content={deepAnalysis} />
                         </div>
-                        <Button className="w-full" onClick={handleGenerateCopy} disabled={isPending}>
-                            {isPending ? <Loader2 className="mr-2 animate-spin" /> : <FileText className="mr-2" />}
-                            コピー生成（最終ステップ）
+                        <Button className="w-full" onClick={hasImprovement ? handleAnalyzeImprovement : handleGenerateCopy} disabled={isPending}>
+                            {isPending ? <Loader2 className="mr-2 animate-spin" /> : hasImprovement ? <ListChecks className="mr-2" /> : <FileText className="mr-2" />}
+                            {hasImprovement ? "次へ（改善提案）" : "コピー生成（最終ステップ）"}
                         </Button>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* STEP 5: Final Copy */}
-            <div className={step === 5 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
+            {/* STEP 5: Improvement (optional) */}
+            {hasImprovement && (
+                <div className={step === 5 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>STEP 5: 改善提案・構成案</CardTitle>
+                            <CardDescription>追加・削除すべき内容の提案と最終構成案です。</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="bg-muted/30 p-4 rounded-lg border max-h-[500px] overflow-y-auto">
+                                <MarkdownRenderer content={improvementAnalysis} />
+                            </div>
+                            <Button className="w-full" onClick={handleGenerateCopy} disabled={isPending}>
+                                {isPending ? <Loader2 className="mr-2 animate-spin" /> : <FileText className="mr-2" />}
+                                コピー生成（最終ステップ）
+                            </Button>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
+
+            {/* Final Step: Final Copy */}
+            <div className={step === finalStepNum ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
                 <Card>
                     <CardHeader>
                         <CardTitle>完成した{resolvedToolName}</CardTitle>

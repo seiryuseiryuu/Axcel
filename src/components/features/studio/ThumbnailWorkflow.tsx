@@ -78,7 +78,7 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
     const [competitors, setCompetitors] = useState<ChannelInput[]>([
         { id: 'comp-1', url: '', name: '', type: 'competitor', thumbnails: [], isLoading: false }
     ]);
-    const [uploadedImages, setUploadedImages] = useState<ChannelThumbnail[]>([]);
+    const [uploadedImages, setUploadedImages] = useState<{ id: string; thumbnail_url: string; description?: string }[]>([]);
 
     // Actions
     const goToStep = (step: number) => setWorkflow(prev => ({ ...prev, step }));
@@ -229,7 +229,9 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                 patternData,
                 referenceUrls,
                 workflow.generatedPrompt, // Use custom prompt
-                shouldPreservePerson
+                shouldPreservePerson,
+                workflow.generatedImages[0] || null, // Pass CURRENT image if refining
+                uploadedImages.map(img => ({ image: img.thumbnail_url, description: img.description || "User uploaded material (Must be included)" })) // Pass uploaded images with strict instruction
             );
 
             if (res.error) {
@@ -274,6 +276,74 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
             }
         });
     };
+    // Exposed as async for RefinementArea
+    const handleRegenerate = async (newPrompt?: string) => {
+        return new Promise<void>((resolve, reject) => {
+            startTransition(async () => {
+                try {
+                    const selectedModel = workflow.selectedModelIndex !== null
+                        ? workflow.modelImages[workflow.selectedModelIndex]
+                        : null;
+
+                    const patternData = workflow.selectedModelIndex !== null && workflow.patternAnalysis
+                        ? workflow.patternAnalysis.patterns[workflow.selectedModelIndex]
+                        : undefined;
+
+                    // Get reference URLs from selected pattern's example images
+                    const exampleIndices = patternData?.exampleImageIndices || [];
+                    const referenceUrls = exampleIndices
+                        .map(idx => workflow.selectedThumbnails[idx - 1]?.thumbnail_url)
+                        .filter(Boolean)
+                        .slice(0, 2);
+
+                    const shouldPreservePerson = selectedModel !== null && uploadedImages.length === 0;
+
+                    // Use the NEW prompt if provided (from RefinementArea), otherwise use state
+                    const promptToUse = newPrompt || workflow.generatedPrompt;
+
+                    const res = await generateFinalThumbnails(
+                        selectedModel,
+                        workflow.text,
+                        workflow.videoTitle,
+                        1,
+                        patternData,
+                        referenceUrls,
+                        promptToUse,
+                        shouldPreservePerson,
+                        workflow.generatedImages[0] || null,
+                        uploadedImages.map(img => ({ image: img.thumbnail_url, description: img.description || "User uploaded material (Must be included)" }))
+                    );
+
+                    if (res.error) {
+                        onError(res.error);
+                        toast({ title: "生成エラー", description: res.error, variant: "destructive" });
+                        reject(new Error(res.error));
+                    } else if (res.data) {
+                        setWorkflow(prev => ({ ...prev, generatedImages: res.data!, step: 6, isPromptEditing: false }));
+
+                        // History save logic (simplified for brevity, original logic preserved in flow if needed, but here we just resolve)
+                        try {
+                            const uploadedArtifacts = [];
+                            for (const base64Image of res.data!) {
+                                const uploadRes = await uploadImage(base64Image, 'thumbnails', 'history');
+                                if (uploadRes.success && uploadRes.url) {
+                                    uploadedArtifacts.push({ image: uploadRes.url });
+                                }
+                            }
+                            if (uploadedArtifacts.length > 0) {
+                                await saveCreation(`サムネイル: ${workflow.videoTitle}`, 'thumbnail', uploadedArtifacts);
+                            }
+                        } catch (e) { console.error(e); }
+
+                        resolve();
+                    }
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+    };
+
 
     const reset = () => {
         setWorkflow({
@@ -365,9 +435,12 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
             {workflow.step === 1 && (
                 <Card>
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <Type className="w-5 h-5" />
-                            Step 1: 動画タイトル・サムネイル文言を入力
+                        <CardTitle className="flex items-start md:items-center gap-2">
+                            <Type className="w-5 h-5 shrink-0 mt-1 md:mt-0" />
+                            <span>
+                                Step 1: 動画タイトル・<br className="md:hidden" />
+                                サムネイル文言を入力
+                            </span>
                         </CardTitle>
                         <CardDescription>サムネイルを作成したい動画の情報と、サムネイルに入れたい文言を入力してください</CardDescription>
                     </CardHeader>
@@ -588,50 +661,84 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
 
                         {/* Image Upload Section - Moved to Step 5 */}
                         <div className="border-t pt-4 mt-4">
-                            <Label className="text-sm font-medium mb-2 block">自前の素材を追加（任意）</Label>
-                            <div className="flex items-center gap-4">
-                                <Button
-                                    variant="outline"
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="gap-2"
-                                >
-                                    <Upload className="w-4 h-4" />
-                                    画像をアップロード
-                                </Button>
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    className="hidden"
-                                    accept="image/*"
-                                    onChange={handleImageUpload}
-                                />
+                            <Label className="text-sm font-medium mb-2 block">自前の素材を追加（任意） v2.3</Label>
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-4">
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="gap-2"
+                                    >
+                                        <Upload className="w-4 h-4" />
+                                        画像をアップロード
+                                    </Button>
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        className="hidden"
+                                        accept="image/*"
+                                        onChange={handleImageUpload}
+                                    />
+                                </div>
+
                                 {uploadedImages.length > 0 && (
-                                    <div className="flex gap-2 overflow-x-auto pb-2">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {uploadedImages.map((img) => (
-                                            <div key={img.id} className="relative w-16 h-9 rounded overflow-hidden border">
-                                                <img src={img.thumbnail_url} className="w-full h-full object-cover" />
-                                                <Button
-                                                    size="icon"
-                                                    variant="destructive"
-                                                    className="absolute top-0 right-0 h-4 w-4 rounded-full opacity-0 group-hover:opacity-100"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setUploadedImages(prev => prev.filter(imgItem => imgItem.id !== img.id));
-                                                    }}
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </Button>
+                                            <div key={img.id} className="flex gap-3 border rounded p-3 bg-muted/20 relative">
+                                                <div className="w-24 aspect-video rounded overflow-hidden border shrink-0 bg-black">
+                                                    <img src={img.thumbnail_url} className="w-full h-full object-contain" />
+                                                </div>
+                                                <div className="flex-1 space-y-2">
+                                                    <div className="flex justify-between">
+                                                        <Label className="text-xs font-bold">この素材の使い方は？</Label>
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-5 w-5 text-muted-foreground hover:text-destructive"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setUploadedImages(prev => prev.filter(imgItem => imgItem.id !== img.id));
+                                                            }}
+                                                        >
+                                                            <X className="w-3 h-3" />
+                                                        </Button>
+                                                    </div>
+                                                    <Input
+                                                        placeholder="例：右側に大きく配置、背景として使用..."
+                                                        className="h-8 text-xs"
+                                                        value={img.description || ''}
+                                                        onChange={(e) => {
+                                                            setUploadedImages(prev => prev.map(item =>
+                                                                item.id === img.id ? { ...item, description: e.target.value } : item
+                                                            ));
+                                                        }}
+                                                    />
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
                                 )}
                             </div>
-                            <p className="text-xs text-muted-foreground mt-1">※ここで追加した画像は、最終的な画像生成の参考素材として使用されます。</p>
+                            <p className="text-xs text-muted-foreground mt-2">※追加した画像は、指定した指示（またはお任せ）に従ってサムネイルに合成されます。</p>
                         </div>
 
                         {/* Prompt Editing Area */}
                         {workflow.isPromptEditing && (
-                            <div className="space-y-2 animate-in fade-in zoom-in-95 duration-300">
+                            <div className="space-y-2 animate-in fade-in zoom-in-95 duration-300 relative">
+                                {isPending && (
+                                    <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-xl border border-primary/20">
+                                        <div className="relative">
+                                            <div className="h-16 w-16 rounded-full border-4 border-primary/30 border-t-primary animate-spin"></div>
+                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                <Sparkles className="h-6 w-6 text-primary animate-pulse" />
+                                            </div>
+                                        </div>
+                                        <p className="mt-4 text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-purple-600 animate-pulse">
+                                            生成中...
+                                        </p>
+                                        <p className="text-sm text-muted-foreground mt-2">※約30秒ほどお待ちください</p>
+                                    </div>
+                                )}
                                 <Label className="text-base font-bold flex items-center gap-2 text-primary">
                                     <Sparkles className="w-4 h-4" />
                                     AIへの指示書（プロンプト）
@@ -688,29 +795,45 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
 
             {/* Step 6: Results */}
             {workflow.step === 6 && (
-                <Card>
+                <Card className="relative overflow-hidden">
+                    {/* Loading Overlay */}
+                    {isPending && (
+                        <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in duration-300">
+                            <div className="relative">
+                                <div className="h-20 w-20 rounded-full border-4 border-primary/30 border-t-primary animate-spin"></div>
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <Sparkles className="h-8 w-8 text-primary animate-pulse" />
+                                </div>
+                            </div>
+                            <p className="mt-6 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-purple-600 animate-pulse">
+                                生成中...
+                            </p>
+                            <p className="text-sm text-muted-foreground mt-2">※品質向上のため、数十秒かかる場合があります</p>
+                        </div>
+                    )}
+
                     <CardHeader className="flex flex-row items-center justify-between">
                         <div>
                             <CardTitle className="flex items-center gap-2">
                                 <Wand2 className="w-5 h-5" />
                                 生成結果
                             </CardTitle>
-                            <CardDescription>完成したサムネイルを確認してください</CardDescription>
+                            <CardDescription>完成したサムネイルを確認してください。プロンプトを調整して再生成も可能です。</CardDescription>
                         </div>
                         <Button variant="outline" size="sm" onClick={reset}>
                             <RefreshCw className="w-4 h-4 mr-2" /> 新規作成
                         </Button>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-8">
                         {/* Single Large Image Display */}
                         {workflow.generatedImages.length > 0 && (
                             <div className="flex flex-col items-center space-y-6">
                                 <div className="relative group rounded-xl overflow-hidden shadow-2xl ring-1 ring-border/50 max-w-4xl w-full">
-                                    <div className="aspect-video bg-muted">
+                                    <div className="aspect-video bg-muted w-full h-full relative">
                                         <img
                                             src={workflow.generatedImages[0]}
                                             alt="生成されたサムネイル"
-                                            className="w-full h-full object-cover"
+                                            className="w-full h-full object-contain bg-black/5"
                                         />
                                     </div>
                                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none" />
@@ -733,15 +856,38 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
                             </div>
                         )}
 
-                        <div className="mt-8 pt-6 border-t border-border/40">
-                            <div className="flex items-center justify-center p-6 bg-muted/20 rounded-xl border border-dashed border-border">
-                                <div className="text-center space-y-2">
-                                    <h3 className="font-semibold text-foreground">修正が必要ですか？</h3>
-                                    <p className="text-sm text-muted-foreground">
-                                        プロンプトやテキストを調整して、もう一度生成できます
-                                    </p>
-                                    <Button variant="outline" onClick={() => goToStep(5)} className="mt-2">
-                                        <ArrowLeft className="w-4 h-4 mr-2" /> プロンプトを調整して再生成
+                        {/* Refinement Section */}
+                        <div className="border-t pt-8">
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles className="w-5 h-5 text-primary" />
+                                    <h3 className="text-lg font-semibold">微調整・再生成</h3>
+                                </div>
+
+                                <RefinementArea
+                                    initialContent={workflow.generatedPrompt}
+                                    contextData={{
+                                        tool: "thumbnail",
+                                        toolName: "サムネイル生成",
+                                        title: workflow.videoTitle,
+                                        description: workflow.videoDescription,
+                                        pattern: selectedModel?.patternName
+                                    }}
+                                    onContentUpdate={(newContent) => setWorkflow(prev => ({ ...prev, generatedPrompt: newContent }))}
+                                    contentType="text"
+                                    onRegenerate={handleRegenerate}
+                                    isRegenerating={isPending}
+                                />
+
+                                <div className="flex justify-end pt-4">
+                                    <Button
+                                        onClick={generateFinalImage}
+                                        disabled={isPending}
+                                        className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg px-8"
+                                        size="lg"
+                                    >
+                                        {isPending ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <RefreshCw className="w-5 h-5 mr-2" />}
+                                        プロンプトの内容で再生成する
                                     </Button>
                                 </div>
                             </div>
@@ -752,3 +898,4 @@ export function ThumbnailWorkflow({ onPromptGenerated, onError }: ThumbnailWorkf
         </div>
     );
 }
+

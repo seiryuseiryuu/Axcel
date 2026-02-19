@@ -26,7 +26,8 @@ import { EyecatchPromptWorkflow } from "@/components/features/studio/EyecatchPro
 import { InstaStoryWorkflow } from "@/components/features/studio/InstaStoryWorkflow";
 import { RefinementArea } from "@/components/features/studio/RefinementArea";
 import { ThemeCustomizer } from "@/components/ui/ThemeCustomizer";
-
+import { LPWorkflow } from "@/components/features/studio/LPWorkflow";
+import { VSLWorkflow } from "@/components/features/studio/VSLWorkflow";
 
 
 // Student用許可ツール（この3つのみ）
@@ -300,12 +301,7 @@ const toolMeta: Record<string, {
         icon: Layout,
         gradient: "from-yellow-500 to-amber-500",
         fields: [
-            { name: "product", label: "商品・サービス *", placeholder: "例: 英会話コーチング", required: true },
-            { name: "target", label: "ターゲット", placeholder: "例: 英語初心者、海外転職を目指す人" },
-            { name: "firstView", label: "ファーストビュー案", placeholder: "例: キャッチコピー＋ビジュアル＋CTA" },
-            { name: "benefits", label: "3大ベネフィット", placeholder: "例: 3ヶ月で話せる、マンツーマン、返金保証", rows: 2 },
-            { name: "faq", label: "想定FAQ", placeholder: "例: どのくらいで効果が出る？支払い方法は？", rows: 2 },
-            { name: "cta", label: "CTA（行動喚起）", placeholder: "例: 無料体験を申し込む" },
+            // Handled by LPWorkflow now, fields redundant but kept for meta if needed
         ]
     },
     "/studio/vsl-writing": {
@@ -570,8 +566,14 @@ export default function AIStudioPage() {
                 )}
 
                 {activeTool === "/studio/lp-writing" && (
-                    <div className="max-w-4xl mx-auto">
-                        <CopywritingWorkflow type="lp-writing" />
+                    <div className="max-w-6xl mx-auto">
+                        <LPWorkflow />
+                    </div>
+                )}
+
+                {activeTool === "/studio/vsl-writing" && (
+                    <div className="max-w-6xl mx-auto">
+                        <VSLWorkflow />
                     </div>
                 )}
 
@@ -600,7 +602,7 @@ export default function AIStudioPage() {
                 )}
 
                 {/* Generic Tools (Eyecatch, Insta Story, etc.) */}
-                {!["/studio/thumbnail", "/studio/script", "/studio/seo", "/studio/short-script", "/studio/social-post", "/studio/note-writing", "/studio/sales-letter", "/studio/lp-writing", "/studio/line-banner", "/studio/note-thumbnail", "/studio/eyecatch-prompt", "/studio/insta-story"].includes(activeTool) && (
+                {!["/studio/thumbnail", "/studio/script", "/studio/seo", "/studio/short-script", "/studio/social-post", "/studio/note-writing", "/studio/sales-letter", "/studio/lp-writing", "/studio/vsl-writing", "/studio/line-banner", "/studio/note-thumbnail", "/studio/eyecatch-prompt", "/studio/insta-story"].includes(activeTool) && (
                     <div className="max-w-4xl mx-auto space-y-6">
                         {/* Header */}
                         <div className="flex items-center gap-4">

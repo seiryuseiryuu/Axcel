@@ -1,4 +1,3 @@
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Use GOOGLE_AI_API_KEY to match .env.local (also works as GEMINI_API_KEY fallback)
@@ -10,14 +9,53 @@ if (!apiKey) {
 
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
+// Helper for Exponential Backoff & Model Fallback
+async function runWithRetry<T>(
+    operation: (modelName: string) => Promise<T>,
+    primaryModel: string,
+    fallbackModels: string[] = []
+): Promise<T> {
+    const models = [primaryModel, ...fallbackModels];
+    let lastError: any;
 
-export async function generateText(prompt: string, temp = 0.7, modelName = "gemini-3-pro-preview") {
+    for (const model of models) {
+        // Retry logic for each model (up to 3 attempts)
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                return await operation(model);
+            } catch (e: any) {
+                lastError = e;
+                const isRateLimit = e.message?.includes("429") || e.message?.includes("quota") || e.message?.includes("Too Many Requests") || e.message?.includes("Resource exhausted");
+                const isServerOverload = e.message?.includes("503") || e.message?.includes("Overloaded");
+
+                if (isRateLimit || isServerOverload) {
+                    console.warn(`Gemini API Error (${model}, attempt ${attempt}/3): ${e.message}. Retrying...`);
+                    // Exponential backoff: 1s, 2s, 4s
+                    await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+                    continue;
+                }
+
+                // If other error, break retry loop and try next model (if strictly model related) or throw
+                // Assume 4xx errors (bad request) shouldn't change with model, except maybe capability
+                if (e.message?.includes("not found") || e.message?.includes("not supported")) {
+                    console.warn(`Model ${model} not available or supported. Trying next model...`);
+                    break; // Try next model immediately
+                }
+
+                throw e; // Non-retriable error
+            }
+        }
+        console.warn(`All attempts failed for model ${model}. Switching to fallback...`);
+    }
+
+    throw lastError;
+}
+
+export async function generateText(prompt: string, temp = 0.7, initialModelName = "gemini-2.0-flash") {
     if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
-    // Allow overriding the model
-    const model = genAI.getGenerativeModel({ model: modelName });
-
-    try {
+    return runWithRetry(async (modelName) => {
+        const model = genAI.getGenerativeModel({ model: modelName });
         const result = await model.generateContent({
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: {
@@ -27,34 +65,27 @@ export async function generateText(prompt: string, temp = 0.7, modelName = "gemi
         });
         const response = await result.response;
         return response.text();
-    } catch (e: any) {
-        console.error(`Gemini Generation Error (${modelName}):`, e);
-        // Better error messages
-        if (e.message?.includes("API key")) throw new Error("APIキーが無効、または設定されていません。");
-        if (e.message?.includes("quota")) throw new Error("API利用枠を超過しました。");
-        if (e.message?.includes("not found")) throw new Error(`指定されたモデル(${modelName})が利用できない可能性があります。`);
-        throw new Error(`AI生成エラー: ${e.message || "不明なエラー"}`);
-    }
+    }, initialModelName, ["gemini-1.5-flash", "gemini-1.5-pro"]);
 }
 
 // YouTube動画をGeminiで直接分析する関数
-// Note: Gemini 2.0+ can analyze YouTube videos by including the URL in the prompt
 export async function generateWithYouTube(prompt: string, youtubeUrl: string, temp = 0.7) {
     if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
-
-    // Use gemini-2.0-flash which has URL/video understanding capabilities
-    const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash-exp",
-        generationConfig: {
-            temperature: temp,
-            maxOutputTokens: 8192,
-        }
-    });
 
     console.log("[generateWithYouTube] Analyzing YouTube video:", youtubeUrl);
 
     // Gemini can understand YouTube URLs directly when included in the prompt
-    const fullPrompt = `以下のYouTube動画を分析してください。
+    // Fallback: gemini-1.5-flash also supports this
+    return runWithRetry(async (modelName) => {
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+                temperature: temp,
+                maxOutputTokens: 8192,
+            }
+        });
+
+        const fullPrompt = `以下のYouTube動画を分析してください。
 
 【分析対象動画】
 ${youtubeUrl}
@@ -63,28 +94,24 @@ ${youtubeUrl}
 
 ${prompt}`;
 
-    try {
         const result = await model.generateContent({
             contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         });
         const response = await result.response;
-        console.log("[generateWithYouTube] Analysis complete");
+        console.log(`[generateWithYouTube] Analysis complete using ${modelName}`);
         return response.text();
-    } catch (e: any) {
-        console.error("[generateWithYouTube] Error:", e);
-        throw new Error(`動画分析エラー: ${e.message || "不明なエラー"}`);
-    }
+    }, "gemini-2.0-flash", ["gemini-1.5-flash", "gemini-1.5-pro"]);
 }
 
-// Helper specific to structured JSON output (if needed in future, though standard text prompt usually works for Gemini Pro with explicit JSON instructions)
+// Helper specific to structured JSON output
 export const gemini = genAI;
 
 export async function generateMultimodal(prompt: string, images: { mimeType: string; data: string }[]) {
     if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
-    const model = genAI.getGenerativeModel({ model: "gemini-3-pro-preview" });
-
-    try {
+    // Only newer models support multimodal well
+    return runWithRetry(async (modelName) => {
+        const model = genAI.getGenerativeModel({ model: modelName });
         const imageParts = images.map(img => ({
             inlineData: {
                 data: img.data,
@@ -103,51 +130,43 @@ export async function generateMultimodal(prompt: string, images: { mimeType: str
         });
         const response = await result.response;
         return response.text();
-    } catch (e: any) {
-        console.error("Gemini Multimodal Error:", e);
-        throw new Error(`AI画像分析エラー: ${e.message || "不明なエラー"}`);
-    }
+    }, "gemini-2.0-flash", ["gemini-1.5-flash", "gemini-1.5-pro"]); // Fallback sequence
 }
 
-// Image Generation using Gemini 3.0 Pro Image Preview
+// Image Generation using Gemini 3.0 Pro Image Preview (No fallback currently widely available via same API shape except maybe older Imagen)
 export async function generateImage(prompt: string): Promise<string> {
     if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
     console.log("[generateImage] Starting with prompt:", prompt.slice(0, 50) + "...");
 
-    // Using gemini-3-pro-image-preview for high quality image generation
-    const model = genAI.getGenerativeModel({
-        model: "gemini-3-pro-image-preview",
-        generationConfig: {
-            // @ts-ignore - responseModalities is supported but not in types yet
-            responseModalities: ["image", "text"],
-        }
-    });
+    // Only gemini-3-pro-image-preview currently for image gen in this lib
+    // We can retry, but fallback is tricky without changing API shape usually.
+    return runWithRetry(async (modelName) => {
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+                // @ts-ignore
+                responseModalities: ["image", "text"],
 
-    try {
-        // Add timeout to prevent indefinite hanging (60 seconds)
+            }
+        });
+
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error("画像生成がタイムアウトしました（60秒）")), 60000);
         });
 
         const generatePromise = model.generateContent({
-            contents: [{
-                role: "user",
-                parts: [{ text: prompt }]
-            }],
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
         });
 
-        console.log("[generateImage] Waiting for API response...");
+        console.log(`[generateImage] Waiting for API response (${modelName})...`);
         const result = await Promise.race([generatePromise, timeoutPromise]);
 
         const response = await result.response;
         const parts = response.candidates?.[0]?.content?.parts;
 
-        console.log("[generateImage] Got response, parts:", parts?.length || 0);
-
         if (parts) {
             for (const part of parts) {
-                // Check for inline data (image)
                 if ((part as any).inlineData) {
                     const inlineData = (part as any).inlineData;
                     console.log("[generateImage] Image generated successfully");
@@ -155,13 +174,8 @@ export async function generateImage(prompt: string): Promise<string> {
                 }
             }
         }
-
-        console.error("[generateImage] No image data in response");
         throw new Error("No image generated in response");
-    } catch (e: any) {
-        console.error("Gemini Image Generation Error:", e);
-        throw new Error(`AI画像生成エラー: ${e.message || "不明なエラー"}`);
-    }
+    }, "gemini-3-pro-image-preview", []); // No fallback for image yet
 }
 
 // Image Generation with Reference Images (Multimodal)
@@ -173,15 +187,16 @@ export async function generateImageWithReference(
 
     console.log("[generateImageWithReference] Starting with", referenceImages.length, "references");
 
-    const model = genAI.getGenerativeModel({
-        model: "gemini-3-pro-image-preview",
-        generationConfig: {
-            // @ts-ignore
-            responseModalities: ["image", "text"],
-        }
-    });
+    return runWithRetry(async (modelName) => {
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+                // @ts-ignore
+                responseModalities: ["image", "text"],
 
-    try {
+            }
+        });
+
         const imageParts = referenceImages.map(img => ({
             inlineData: {
                 data: img.data,
@@ -189,7 +204,6 @@ export async function generateImageWithReference(
             }
         }));
 
-        // Enhanced prompt that emphasizes reproduction from references
         const enhancedPrompt = `[REFERENCE IMAGES PROVIDED ABOVE]
 
 Study the reference images carefully and reproduce:
@@ -204,7 +218,6 @@ ${prompt}
 
 IMPORTANT: Match the quality and style of the reference images as closely as possible.`;
 
-        // Add timeout to prevent indefinite hanging (60 seconds)
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error("画像生成がタイムアウトしました（60秒）")), 60000);
         });
@@ -213,19 +226,16 @@ IMPORTANT: Match the quality and style of the reference images as closely as pos
             contents: [{
                 role: "user",
                 parts: [
-                    ...imageParts,  // Reference images first
+                    ...imageParts,
                     { text: enhancedPrompt }
                 ]
             }],
         });
 
-        console.log("[generateImageWithReference] Waiting for API response...");
+        console.log(`[generateImageWithReference] Waiting for API response (${modelName})...`);
         const result = await Promise.race([generatePromise, timeoutPromise]);
-
         const response = await result.response;
         const parts = response.candidates?.[0]?.content?.parts;
-
-        console.log("[generateImageWithReference] Got response, parts:", parts?.length || 0);
 
         if (parts) {
             for (const part of parts) {
@@ -236,11 +246,6 @@ IMPORTANT: Match the quality and style of the reference images as closely as pos
                 }
             }
         }
-
-        console.error("[generateImageWithReference] No image data in response");
         throw new Error("No image generated in response");
-    } catch (e: any) {
-        console.error("Gemini Multimodal Image Generation Error:", e);
-        throw new Error(`AI画像生成エラー: ${e.message || "不明なエラー"}`);
-    }
+    }, "gemini-3-pro-image-preview", []);
 }

@@ -1,16 +1,16 @@
 // Eye-catch Prompt Generator Types
 
-export type ImageStyle = 'photorealistic' | 'illustration' | 'anime' | 'watercolor' | '3d_render' | 'minimal' | 'flat_design';
+export type ImageStyle = 'photorealistic' | 'minimal' | 'vibrant' | 'professional' | 'anime' | '3d-render' | 'cyberpunk';
 export type AspectRatio = '16:9' | '4:3' | '1:1' | '9:16' | '3:2' | '2:1';
 
 export const IMAGE_STYLE_OPTIONS: { value: ImageStyle; label: string; description: string }[] = [
-    { value: 'photorealistic', label: 'フォトリアル', description: '実写のような高品質な画像' },
-    { value: 'illustration', label: 'イラスト', description: 'デジタルイラスト風' },
-    { value: 'anime', label: 'アニメ調', description: '日本のアニメ風スタイル' },
-    { value: 'watercolor', label: '水彩画', description: '柔らかい水彩画風' },
-    { value: '3d_render', label: '3Dレンダー', description: '3DCG風のレンダリング' },
-    { value: 'minimal', label: 'ミニマル', description: 'シンプルでクリーンなデザイン' },
-    { value: 'flat_design', label: 'フラットデザイン', description: 'モダンなフラットスタイル' },
+    { value: 'photorealistic', label: 'フォトリアル (写真)', description: 'High-quality photography, 8k resolution, realistic lighting, sharp focus' },
+    { value: 'minimal', label: 'ミニマリスト (シンプル)', description: 'Clean, flat design, vector art, simple composition, soft colors' },
+    { value: 'vibrant', label: 'ビビッド (鮮やか)', description: 'Bright, colorful, energetic, digital illustration style' },
+    { value: 'professional', label: 'プロフェッショナル (ビジネス)', description: 'Corporate, trustworthy, balanced lighting, high-end commercial look' },
+    { value: 'anime', label: 'アニメ風 (Niji)', description: 'Japanese anime style, cel shaded, highly detailed, Makoto Shinkai style lighting' },
+    { value: '3d-render', label: '3Dレンダー (Octane)', description: '3D graphics, Octane Render, Unreal Engine 5, clay or plastic texture, isometric' },
+    { value: 'cyberpunk', label: 'サイバーパンク (未来)', description: 'Neon lights, futuristic city, dark atmosphere, high contrast' },
 ];
 
 export const ASPECT_RATIO_OPTIONS: { value: AspectRatio; label: string; description: string }[] = [

@@ -5,6 +5,7 @@ import {
     analyzeLpStructure,
     analyzeLpCustomer,
     analyzeLpDeep,
+    analyzeLpImprovement,
     writeLpCopy
 } from "@/app/actions/lpWriting";
 
@@ -18,6 +19,7 @@ export default function LpWritingPage() {
                     analyzeStructure: analyzeLpStructure,
                     analyzeCustomer: analyzeLpCustomer,
                     analyzeDeep: analyzeLpDeep,
+                    analyzeImprovement: analyzeLpImprovement,
                     generateCopy: writeLpCopy
                 }}
                 defaultProductInfo={`商品名：\n価格：\nターゲット：\n特徴：`}
