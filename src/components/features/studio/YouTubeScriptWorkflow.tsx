@@ -493,12 +493,19 @@ export function YouTubeScriptWorkflow({ onError }: YouTubeScriptWorkflowProps) {
                 setWorkflow(prev => ({ ...prev, finalScript: result.data! }));
                 toast({ title: "台本作成完了！", description: "台本が完成しました" });
 
-                // Save to history
+                // Save to history with full generation context
                 try {
                     await saveCreation(
                         `YouTube台本: ${workflow.referenceUrl?.slice(0, 30)}...`,
                         'video_script',
-                        result.data!
+                        {
+                            finalScript: result.data!,
+                            referenceUrl: workflow.referenceUrl,
+                            structureAnalysis: workflow.structureAnalysis,
+                            viewerNeeds: workflow.viewerNeeds,
+                            revisedStructure: workflow.revisedStructure,
+                            channelStyle: workflow.channelStyle,
+                        }
                     );
                 } catch (err) {
                     console.error("Failed to save history:", err);

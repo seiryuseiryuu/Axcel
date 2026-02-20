@@ -112,13 +112,13 @@ export function SocialPostWorkflow() {
                 setStep(STEPS.RESULT);
                 toast({ title: "生成完了", description: "3パターンの投稿を作成しました" });
 
-                // Save to History
+                // Save to History with generation context
                 try {
-                    const contentToSave = result.data.map((p: any) => `【${p.type || 'パターン'}】\n${p.content}\n\n`).join("---\n\n");
+                    const contentText = result.data.map((p: any) => `【${p.type || 'パターン'}】\n${p.content}\n\n`).join("---\n\n");
                     await saveCreation(
                         `${platform === 'x' ? 'X投稿' : 'Threads投稿'}: ${theme.slice(0, 30)}...`,
                         'mixed',
-                        contentToSave
+                        { finalScript: contentText, theme, platform }
                     );
                 } catch (e) {
                     console.error("Failed to save history", e);
