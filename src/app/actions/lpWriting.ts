@@ -14,39 +14,74 @@ async function takeLpScreenshot(url: string): Promise<{ buffer: Buffer; mimeType
 import { generateMultimodal } from "@/lib/gemini";
 
 export async function analyzeLpStructure(url: string) {
-// 1. Take Screenshot
-// Note: Puppeteer setup might need adjustment depending on deployment (Vercel vs Local)
-// For now, implemented logic assumes ability to run Chrome.
-// If local dev environment fails, we might need a fallback or ensure Chrome path.
-
-// Attempt screenshot
-// If it fails (e.g. no browser found), fallback to text-only fetch?
-// User requirement strictly asks for "reading text in images", so text-only is not enough.
-// But let's keep text fallback just in case for robustness if screenshot fails entirely.
-
-let screenshotData = null;
-try {
-    screenshotData = await takeLpScreenshot(url);
-} catch (e) {
-    console.warn("Screenshot failed, falling back to text", e);
-}
-
-if (!screenshotData) {
-    // Fallback to text analysis if screenshot fails
-    const webData = await fetchWebContent(url);
-    if (!webData.success || !webData.content) {
-        return { success: false, error: webData.error || "URLからの情報取得に失敗しました" };
+    // 1. Attempt screenshot (currently disabled)
+    let screenshotData = null;
+    try {
+        screenshotData = await takeLpScreenshot(url);
+    } catch (e) {
+        console.warn("Screenshot failed, falling back to text", e);
     }
-    // ... (Old Logic / Text Only Prompt - Simplified for this context)
-    // Ideally we should inform user "Image analysis failed", but let's try to proceed.
-    // For strict requirement, maybe error out?
-    // Let's use the text content with a warning context.
-    return { success: false, error: "LPのスクリーンショット撮影に失敗しました。環境設定を確認してください。" };
-}
 
-const imageBase64 = screenshotData.buffer.toString('base64');
+    if (!screenshotData) {
+        // Fallback: text-based analysis using fetchWebContent
+        console.log("[LP] Screenshot unavailable, using text-based analysis for:", url);
+        const webData = await fetchWebContent(url);
+        console.log("[LP] fetchWebContent result:", { success: webData.success, contentLength: webData.content?.length, error: webData.error });
+        if (!webData.success || !webData.content) {
+            return { success: false, error: webData.error || "URLからの情報取得に失敗しました。URLが正しいか確認してください。" };
+        }
 
-const prompt = `あなたは世界最高峰のLP構成作家です。
+        const textPrompt = `あなたは世界最高峰のLP構成作家です。
+以下の「LPのテキストコンテンツ」を詳細に分析し、その「売れている構造」を完全に分解してください。
+
+URL: ${url}
+
+【LPのテキストコンテンツ】
+${webData.content.substring(0, 15000)}
+
+## 分析指示
+参考LPのセクション構成を以下のマークダウン形式で分解してください。
+
+# 構成分析レポート
+
+## 1. ファーストビュー(FV)分析
+- **キャッチコピー**: (テキストから推測されるメインキャッチコピー)
+- **訴求要素**: (実績、権威性、ベネフィットなど何を強調しているか)
+- **メインビジュアル**: (テキストから推測される視覚要素)
+
+## 2. 全体構成フロー
+FV以下の構成を「テキストの流れ」からセクションごとに分解してください。
+「何が書かれているか」を具体的に抽出してください。テンプレへの当てはめは禁止です。
+
+| セクション | 役割 | 実際の内容・訴求ポイント |
+|:---|:---|:---|
+| (例: 導入) | (例: 共感) | (例: 「〇〇で悩んでいませんか？」という問いかけ) |
+| ... | ... | ... |
+
+## 3. LPで一貫して訴求している要素（訴求軸）
+このLPが「最も強く訴求している軸」を以下から1つ、または掛け合わせ（例: 新規性×再現性）で特定し、その理由を解説してください。
+- **新規性**: 新しい商品・サービスであること
+- **独自性**: 唯一無二であること（他にはない）
+- **権威性**: 実績や開発者がすごいこと
+- **簡易性**: 簡単に結果が出ること（楽、早い）
+- **再現性**: 誰でも成果が出ること
+
+**特定した訴求軸**: (ここに出力)
+**理由**: (テキストのどの部分からそう判断したか)
+`;
+
+        try {
+            const result = await generateText(textPrompt, 0.5);
+            let cleanResult = result.replace(/^```markdown\n/, '').replace(/^```\n/, '').replace(/```$/, '');
+            return { success: true, data: cleanResult };
+        } catch (e: any) {
+            return { success: false, error: e.message || "構成分析エラー" };
+        }
+    }
+
+    const imageBase64 = screenshotData.buffer.toString('base64');
+
+    const prompt = `あなたは世界最高峰のLP構成作家です。
 以下の「LP全体のスクリーンショット」を詳細に分析し、その「売れている構造」を完全に分解してください。
 画像化されている文字（ヘッダー画像内のキャッチコピーなど）も全て読み取り、分析対象としてください。
 
@@ -84,21 +119,18 @@ FV以下の構成を「見たまま」セクションごとに分解してくだ
 **理由**: (画像やテキストのどの部分からそう判断したか)
 `;
 
-try {
-    const result = await generateMultimodal(prompt, [{ mimeType: 'image/jpeg', data: imageBase64 }]);
-
-    // Clean up markdown code blocks if present
-    let cleanResult = result.replace(/^```markdown\n/, '').replace(/^```\n/, '').replace(/```$/, '');
-
-    return { success: true, data: cleanResult };
-} catch (e: any) {
-    return { success: false, error: e.message || "構成分析エラー" };
-}
+    try {
+        const result = await generateMultimodal(prompt, [{ mimeType: 'image/jpeg', data: imageBase64 }]);
+        let cleanResult = result.replace(/^```markdown\n/, '').replace(/^```\n/, '').replace(/```$/, '');
+        return { success: true, data: cleanResult };
+    } catch (e: any) {
+        return { success: false, error: e.message || "構成分析エラー" };
+    }
 }
 
 // --- STEP 3: Target & Emotional Analysis ---
 export async function analyzeLpCustomer(structureAnalysis: string) {
-const prompt = `あなたは天才的なマーケターです。
+    const prompt = `あなたは天才的なマーケターです。
 以下のLP構成分析を見て、このLPがターゲットにしている「顧客」の心理変化を分析してください。
 
 【LP構成分析】
@@ -131,12 +163,12 @@ ${structureAnalysis}
 - **ハードル**: (例: 価格が高い) → **突破**: (例: 分割払い、返金保証)
 `;
 
-try {
-    const result = await generateText(prompt, 0.5);
-    return { success: true, data: result };
-} catch (e: any) {
-    return { success: false, error: e.message || "顧客分析エラー" };
-}
+    try {
+        const result = await generateText(prompt, 0.5);
+        return { success: true, data: result };
+    } catch (e: any) {
+        return { success: false, error: e.message || "顧客分析エラー" };
+    }
 }
 
 // --- STEP 4: Product Hearing (Chat) ---
@@ -144,23 +176,23 @@ try {
 const MAX_HEARING_QUESTIONS = 5;
 
 export async function generateHearingQuestion(
-currentInfo: string,
-history: { role: 'user' | 'model', text: string }[]
+    currentInfo: string,
+    history: { role: 'user' | 'model', text: string }[]
 ) {
-const historyText = history.map(h => `${h.role === 'user' ? 'ユーザー' : 'AI'}: ${h.text}`).join('\n');
+    const historyText = history.map(h => `${h.role === 'user' ? 'ユーザー' : 'AI'}: ${h.text}`).join('\n');
 
-const userAnswerCount = history.filter(h => h.role === 'user').length;
-const remainingQuestions = MAX_HEARING_QUESTIONS - userAnswerCount;
-const isLastQuestion = remainingQuestions <= 1;
+    const userAnswerCount = history.filter(h => h.role === 'user').length;
+    const remainingQuestions = MAX_HEARING_QUESTIONS - userAnswerCount;
+    const isLastQuestion = remainingQuestions <= 1;
 
-if (remainingQuestions <= 0) {
-    return {
-        success: true,
-        data: "[完了] ヒアリングが完了しました。「次へ」ボタンを押して、ターゲット定義を確認してください。"
-    };
-}
+    if (remainingQuestions <= 0) {
+        return {
+            success: true,
+            data: "[完了] ヒアリングが完了しました。「次へ」ボタンを押して、ターゲット定義を確認してください。"
+        };
+    }
 
-const prompt = `あなたはプロのセールスライターです。
+    const prompt = `あなたはプロのセールスライターです。
 ユーザーから「新しく作成する商品・サービス」の情報を引き出すために、ヒアリングを行っています。
 
 **【重要】参考LPの情報は完全に無視してください。**
@@ -189,17 +221,17 @@ ${isLastQuestion ? '【重要】これが最後の質問です。質問の後に
 質問は簡潔に、答えやすくしてください。
 `;
 
-try {
-    const result = await generateText(prompt, 0.7);
-    return { success: true, data: result };
-} catch (e: any) {
-    return { success: false, error: e.message || "ヒアリング生成エラー" };
-}
+    try {
+        const result = await generateText(prompt, 0.7);
+        return { success: true, data: result };
+    } catch (e: any) {
+        return { success: false, error: e.message || "ヒアリング生成エラー" };
+    }
 }
 
 // NEW: Step 4.5 Generate Consolidated Product Profile
 export async function generateProductProfile(hearingHistoryText: string) {
-const prompt = `あなたは優秀なマーケティングストラテジストです。
+    const prompt = `あなたは優秀なマーケティングストラテジストです。
 以下のヒアリング履歴を元に、今回LPを作成する「商品・サービス」および「ターゲット」の定義書を作成してください。
 ユーザーが手動で修正するため、編集しやすいマークダウン形式で出力してください。
 
@@ -224,21 +256,21 @@ ${hearingHistoryText}
 - 
 `;
 
-try {
-    const result = await generateText(prompt, 0.5);
-    return { success: true, data: result };
-} catch (e: any) {
-    return { success: false, error: e.message || "プロファイル生成エラー" };
-}
+    try {
+        const result = await generateText(prompt, 0.5);
+        return { success: true, data: result };
+    } catch (e: any) {
+        return { success: false, error: e.message || "プロファイル生成エラー" };
+    }
 }
 
 // --- STEP 5: Propose LP Outline (JSON) ---
 export async function proposeLpOutline(
-structureAnalysis: string,
-customerAnalysis: string,
-productInfo: string
+    structureAnalysis: string,
+    customerAnalysis: string,
+    productInfo: string
 ) {
-const prompt = `あなたは世界最高峰のLP構成作家です。
+    const prompt = `あなたは世界最高峰のLP構成作家です。
 「参考LPの売れる構造」と「顧客の感情曲線」を、今回の「新しい商品」に当てはめて、最強のLP構成案を作成してください。
 
 【参考LPの構造】
@@ -280,23 +312,23 @@ ${productInfo}
 \`\`\`
 `;
 
-try {
-    const result = await generateText(prompt, 0.6);
-    // Extract JSON from code block
-    const jsonMatch = result.match(/```json([\s\S]*?)```/);
-    const jsonString = jsonMatch ? jsonMatch[1] : result;
-    return { success: true, data: jsonString.trim() }; // Return JSON string
-} catch (e: any) {
-    return { success: false, error: e.message || "構成提案エラー" };
-}
+    try {
+        const result = await generateText(prompt, 0.6);
+        // Extract JSON from code block
+        const jsonMatch = result.match(/```json([\s\S]*?)```/);
+        const jsonString = jsonMatch ? jsonMatch[1] : result;
+        return { success: true, data: jsonString.trim() }; // Return JSON string
+    } catch (e: any) {
+        return { success: false, error: e.message || "構成提案エラー" };
+    }
 }
 
 // --- STEP 6: Write LP Copy ---
 export async function writeLpCopy(
-finalizedOutline: string, // JSON or structured text
-productInfo: string
+    finalizedOutline: string, // JSON or structured text
+    productInfo: string
 ) {
-const prompt = `あなたは伝説のセールスライターです。
+    const prompt = `あなたは伝説のセールスライターです。
 ユーザーが確定させた「最強のLP構成（アウトライン）」を元に、新しい商品のLP原稿を執筆してください。
 
 【商品情報】
@@ -374,10 +406,10 @@ ${finalizedOutline}
 5. ...
 `;
 
-try {
-    const result = await generateText(prompt, 0.7);
-    return { success: true, data: result };
-} catch (e: any) {
-    return { success: false, error: e.message || "ライティングエラー" };
-}
+    try {
+        const result = await generateText(prompt, 0.7);
+        return { success: true, data: result };
+    } catch (e: any) {
+        return { success: false, error: e.message || "ライティングエラー" };
+    }
 }
