@@ -31,12 +31,14 @@ import { VSLWorkflow } from "@/components/features/studio/VSLWorkflow";
 import { VideoClipWorkflow } from "@/components/features/studio/VideoClipWorkflow";
 
 
-// Student用許可ツール（この3つのみ）
+// Student用許可ツール
 const STUDENT_ALLOWED_TOOLS = [
-    "/studio/thumbnail",    // YouTubeサムネイル
-    "/studio/seo",          // SEO記事
-    "/studio/script",       // YouTube台本
-    "/studio/social-post",  // X・Threads投稿
+    "/studio/thumbnail",        // YouTubeサムネイル
+    "/studio/seo",              // SEO記事
+    "/studio/script",           // YouTube台本
+    "/studio/social-post",      // X・Threads投稿
+    "/studio/video-clip",       // 動画切り抜き分析
+    "/studio/note-thumbnail",   // note/Brain/Tipsサムネイル
 ];
 
 // Admin用許可ツール（全部）

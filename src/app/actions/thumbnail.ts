@@ -400,9 +400,10 @@ export async function generateModelImages(
 
             const prompt = `YouTubeサムネイルのモデル画像を生成。
 
-★★★ 最重要ルール ★★★
-${text ? `画像内に表示して良いテキストは「${text}」のみ。それ以外の文字（英語・日本語・数字・記号・ロゴ・ウォーターマーク等）は一切禁止。` : `画像内にテキスト・文字・記号・ロゴを一切含めないこと。完全にテキストフリーの画像を生成すること。`}
-CRITICAL: Do NOT add any text, letters, numbers, watermarks, or symbols ${text ? `other than exactly "${text}"` : 'anywhere in the image'}. Any extra text will be considered a failure.
+★★★ 最重要ルール：テキスト禁止 ★★★
+${text ? `画像内に表示して良いテキストは「${text}」のみ。それ以外の文字（英語・日本語・数字・ロゴ・ウォーターマーク等）は一切禁止。` : `画像内にテキスト・文字・ロゴを一切含めないこと。完全にテキストフリーの画像を生成すること。`}
+CRITICAL: Do NOT add any text, words, letters, numbers, watermarks, or logos ${text ? `other than exactly "${text}"` : 'anywhere in the image'}. Any extra text will be considered a failure.
+NOTE: Decorative visual elements like arrows (→ ← ↑ ↓), geometric shapes, lines, and visual effects ARE ALLOWED. Only text/words/letters/numbers are prohibited.
 
 【動画情報】
 ${videoDescription ? `内容: ${videoDescription}` : ''}
@@ -423,8 +424,9 @@ ${textRule}
 【禁止事項（厳守）】
 - 指定外のテキスト・文字列の描画は絶対禁止
 - 英語のランダムな単語やフレーズを入れない
-- 意味不明な記号や装飾文字を入れない
-- リファレンス画像に含まれるテキストをコピーしない`;
+- リファレンス画像に含まれるテキストをコピーしない
+【許可事項】
+- 矢印（→←↑↓）、図形、線、光彩、集中線等の視覚効果は使用可`;
 
             let imageUrl: string;
             try {
