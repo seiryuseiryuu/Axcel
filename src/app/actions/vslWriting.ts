@@ -72,29 +72,66 @@ export async function analyzeVslAudience(structureAnalysis: string) {
 ${structureAnalysis}
 
 ## 分析指示
-この動画に反応する視聴者の「表の顔」と「裏の顔（インサイト）」を分析してください。
+以下のフォーマットに従って、視聴者プロファイリングを出力してください。
+各セクションを必ず含め、具体的かつ簡潔に記述すること。
 
 # VSL視聴者プロファイリング
 
 ## 1. ターゲット属性（デモグラフィック）
-- 年代、性別、職業、ライフスタイル
+- **年代**: （具体的な年齢層）
+- **性別**: （比率の推定）
+- **職業**: （具体的な職種を列挙）
+- **ライフスタイル**: （箇条書きで3〜4項目）
 
 ## 2. 悩みと痛み（サイコグラフィック）
-- **顕在的な悩み**: (口に出して言う悩み)
-- **潜在的な恐怖**: (誰にも言えない不安、夜も眠れない恐怖)
+- **顕在的な悩み**:（口に出して言う悩みを「」付きで3〜5個列挙）
+- **潜在的な恐怖**:（誰にも言えない不安を「」付きで3〜5個列挙）
 
 ## 3. 欲求レベル（Awareness Level）
+このVSL動画が最も効果を発揮するターゲット層を以下から特定してください：
 - **O1 (Unaware)**: 悩みにも気づいていない
 - **O2 (Problem Aware)**: 悩みはあるが解決策を知らない
-- ...どの段階の層に刺さる動画か？
+- **O3 (Solution Aware)**: 解決策は知っているが具体的方法を探している
+- **O4 (Product Aware)**: 具体的な商品・サービスを比較検討中
+- **O5 (Most Aware)**: すでに購入を決めかけている
+
+**最も効果的な層**: （O2やO3など特定し、理由を説明）
 
 ## 4. 反応する「トリガー」
-- どんな言葉や映像を見せた瞬間に「これだ！」と思うか？
+- **言葉**: （動画内の具体的なフレーズと、なぜそれが刺さるかを3〜5個）
+- **映像**: （効果的な映像要素を3〜4個）
+
+## 5. 表の顔と裏の顔（インサイト）
+
+| 項目 | 表の顔（周囲に見せる姿） | 裏の顔（本音・インサイト） |
+|:---|:---|:---|
+| 自己認識 | （例: 向上心がある自分） | （例: 本当は自信がない） |
+| お金 | （表の態度） | （本音） |
+| 将来 | （表の態度） | （本音） |
+| 行動 | （表の態度） | （本音） |
+
+以上のフォーマットで出力してください。テーブルは上記の4行のみで完結させてください。追加の行は不要です。
 `;
 
     try {
-        const result = await generateText(prompt, 0.5);
-        return { success: true, data: result };
+        const result = await generateText(prompt, 0.5, "gemini-2.0-flash", 3000);
+        // Clean up any potential runaway output
+        let cleanResult = result;
+        // Detect and truncate if a table row pattern repeats excessively
+        const lines = cleanResult.split('\n');
+        const truncatedLines: string[] = [];
+        let consecutivePipeLines = 0;
+        for (const line of lines) {
+            if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+                consecutivePipeLines++;
+                if (consecutivePipeLines > 10) continue; // Skip excessive table rows
+            } else {
+                consecutivePipeLines = 0;
+            }
+            truncatedLines.push(line);
+        }
+        cleanResult = truncatedLines.join('\n');
+        return { success: true, data: cleanResult };
     } catch (e: any) {
         return { success: false, error: e.message || "視聴者分析エラー" };
     }

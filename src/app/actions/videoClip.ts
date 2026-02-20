@@ -72,8 +72,8 @@ export async function extractClipCandidates(
     correctedSubtitles: string,
     clipLengthSeconds: number
 ) {
-    const minLength = clipLengthSeconds - 15;
-    const maxLength = clipLengthSeconds + 30;
+    const minLength = clipLengthSeconds - 10;
+    const maxLength = clipLengthSeconds + 10;
 
     const prompt = `あなたはYouTube動画の切り抜き編集のプロフェッショナルです。
 以下のタイムコード付き字幕から、ショート動画として「バズる可能性が高い」切り抜き箇所を抽出してください。

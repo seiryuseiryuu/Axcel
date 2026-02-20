@@ -51,7 +51,7 @@ async function runWithRetry<T>(
     throw lastError;
 }
 
-export async function generateText(prompt: string, temp = 0.7, initialModelName = "gemini-2.0-flash") {
+export async function generateText(prompt: string, temp = 0.7, initialModelName = "gemini-2.0-flash", maxTokens = 8192) {
     if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
     return runWithRetry(async (modelName) => {
@@ -60,7 +60,7 @@ export async function generateText(prompt: string, temp = 0.7, initialModelName 
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: {
                 temperature: temp,
-                maxOutputTokens: 8192,
+                maxOutputTokens: maxTokens,
             }
         });
         const response = await result.response;
