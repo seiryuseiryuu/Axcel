@@ -394,7 +394,15 @@ export async function generateModelImages(
                 referenceImages = (await Promise.all(fetchPromises)).filter(Boolean) as any[];
             }
 
+            const textRule = text
+                ? `【テキスト指示】「${text}」のみを画像内に配置すること。この文言以外の文字は絶対に入れてはならない。`
+                : `【テキスト指示】この画像には文字・テロップを一切入れないこと。`;
+
             const prompt = `YouTubeサムネイルのモデル画像を生成。
+
+★★★ 最重要ルール ★★★
+${text ? `画像内に表示して良いテキストは「${text}」のみ。それ以外の文字（英語・日本語・数字・記号・ロゴ・ウォーターマーク等）は一切禁止。` : `画像内にテキスト・文字・記号・ロゴを一切含めないこと。完全にテキストフリーの画像を生成すること。`}
+CRITICAL: Do NOT add any text, letters, numbers, watermarks, or symbols ${text ? `other than exactly "${text}"` : 'anywhere in the image'}. Any extra text will be considered a failure.
 
 【動画情報】
 ${videoDescription ? `内容: ${videoDescription}` : ''}
@@ -410,7 +418,13 @@ ${pattern.description}
 【生成ルール】
 - アスペクト比: 16:9（1280x720） ※正方形は不可。必ず横長のYouTubeサムネイルサイズで出力すること。
 - 上記パターンの特徴を忠実に再現
-- テロップ: ${text ? `「${text}」という文字を配置（文字化けを防ぐため、正確な日本語で描画）。【重要】これ以外の文字（英語、数字、記号）は一切入れないこと。` : '【重要】文字・テロップは一切入れない（No Text）。画像とデザインのみで構成する。英語の文字や謎の記号も禁止。'}`;
+${textRule}
+
+【禁止事項（厳守）】
+- 指定外のテキスト・文字列の描画は絶対禁止
+- 英語のランダムな単語やフレーズを入れない
+- 意味不明な記号や装飾文字を入れない
+- リファレンス画像に含まれるテキストをコピーしない`;
 
             let imageUrl: string;
             try {
@@ -669,11 +683,15 @@ export async function generateFinalThumbnails(
             ? `[TASK: PROFESSIONAL IMAGE EDITING]
 You are a master thumbnail editor. Combine the elements from the provided reference images as instructed.
 
+[ABSOLUTE TEXT PROHIBITION]
+${text.trim().length > 0 ? `The ONLY text allowed in this image is exactly: "${text}". Any other text, letters, numbers, watermarks, logos, or symbols are STRICTLY FORBIDDEN. Do NOT copy text from reference images.` : `This image must contain ZERO text. No letters, numbers, watermarks, logos, or symbols of any kind.`}
+
 [CONSTRAINTS]
 1. CHARACTER & FACE: You MUST PRESERVE the character/person from the reference image UNLESS replaced by a User Material.
 2. FONT: RETAIN the font's 3D effects, color gradients, and stroke styles from the pattern.
 3. COMPOSITION: Strictly follow the layout logic.
 4. FORMAT: FORCE 16:9 Aspect Ratio (Landscape). Do NOT produce square images even if references are square.
+5. TEXT: ${text.trim().length > 0 ? `ONLY "${text}" is allowed. REMOVE all other text from references.` : 'NO TEXT WHATSOEVER.'}
 
 ${patternInfo}
 ${textInstruction}
@@ -682,10 +700,13 @@ ${customPrompt ? `\n[CRITICAL: USER OVERRIDE INSTRUCTIONS]\nThe following instru
 `
             : `Create a High-Quality YouTube Thumbnail.
 
+[ABSOLUTE TEXT PROHIBITION]
+${text.trim().length > 0 ? `The ONLY text allowed in this image is exactly: "${text}". Any other text, letters, numbers, watermarks, logos, or symbols are STRICTLY FORBIDDEN. Do NOT copy text from reference images.` : `This image must contain ZERO text. No letters, numbers, watermarks, logos, or symbols of any kind.`}
+
 ${patternInfo}
 ${textInstruction}
 ${materialInstruction}
-[QUALITY] 8k resolution, sharf focus, masterpiece.
+[QUALITY] 8k resolution, sharp focus, masterpiece.
 [FORMAT] 16:9 Aspect Ratio (Landscape). NEVER generate square images.
 ${customPrompt ? `\n[CRITICAL: USER OVERRIDE INSTRUCTIONS]\nThe following instructions are provided by the user and MUST be followed precisely. If they conflict with "Base Pattern Strategy", the USER INSTRUCTIONS prevail.\n\n${customPrompt}` : ''}
 `;

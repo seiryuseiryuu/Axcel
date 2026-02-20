@@ -42,10 +42,12 @@ export interface StyleOption {
     id: string;
     label: string;
     description: string;
+    thumbnailUrl?: string; // パターンの代表画像URL
 }
 
 export interface AnalyzedMedia {
     imageUrl: string;
+    images: { url: string }[]; // 取得した複数画像
     styleDescription: string;
     styleOptions?: StyleOption[];
 }

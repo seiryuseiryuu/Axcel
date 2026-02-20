@@ -10,11 +10,13 @@ import { load } from "cheerio";
 interface MediaAnalysisResult {
     styleDescription: string;
     imageUrl?: string;
+    images: { url: string }[];
     styleOptions: StyleOption[];
 }
 
-// Analyze visual style from a media URL
+// Analyze visual style from a media URL — crawl multiple images and create theme patterns
 async function analyzeMediaStyle(url: string): Promise<MediaAnalysisResult> {
+    const emptyResult: MediaAnalysisResult = { styleDescription: "", images: [], styleOptions: [] };
     try {
         console.log("Analyzing media style for:", url);
         const res = await fetch(url, {
@@ -28,24 +30,20 @@ async function analyzeMediaStyle(url: string): Promise<MediaAnalysisResult> {
         let finalUrl = url;
 
         // CRAWLER LOGIC: If this looks like a top page, find the first article
-        // Heuristic: User likely sent a media home page. valid article links usually have detailed paths.
         const articleLinks: string[] = [];
         $('a').each((_, el) => {
             const href = $(el).attr('href');
             if (!href) return;
-
-            // Normalize URL
             let fullUrl = href;
             try {
                 if (href.startsWith('/')) {
                     const u = new URL(url);
                     fullUrl = `${u.protocol}//${u.host}${href}`;
                 } else if (!href.startsWith('http')) {
-                    return; // Skip weird protocols
+                    return;
                 }
             } catch (e) { return; }
 
-            // Filter out common non-article pages
             if (fullUrl === url) return;
             if (fullUrl.includes('/category/')) return;
             if (fullUrl.includes('/tag/')) return;
@@ -54,12 +52,11 @@ async function analyzeMediaStyle(url: string): Promise<MediaAnalysisResult> {
             if (fullUrl.includes('about')) return;
             if (fullUrl.includes('login')) return;
             if (fullUrl.includes('search')) return;
-            if (fullUrl.length < url.length + 10) return; // Too short likely nav
+            if (fullUrl.length < url.length + 10) return;
 
             articleLinks.push(fullUrl);
         });
 
-        // If we found potential articles, pick the first one and fetch IT
         if (articleLinks.length > 0) {
             console.log("Found article links, analyzing first one:", articleLinks[0]);
             try {
@@ -76,55 +73,93 @@ async function analyzeMediaStyle(url: string): Promise<MediaAnalysisResult> {
             }
         }
 
-        // Try to find a representative image (OG Image or first large image)
-        let imageUrl = $('meta[property="og:image"]').attr('content') ||
-            $('meta[name="twitter:image"]').attr('content') ||
-            $('img').first().attr('src');
+        // --- Collect multiple images (up to 5) ---
+        const imageUrls: string[] = [];
+        const seen = new Set<string>();
 
-        if (!imageUrl) return { styleDescription: "", styleOptions: [] };
+        const addUrl = (rawUrl: string | undefined) => {
+            if (!rawUrl || imageUrls.length >= 5) return;
+            let full = rawUrl;
+            try {
+                if (rawUrl.startsWith('/')) {
+                    const u = new URL(finalUrl);
+                    full = `${u.protocol}//${u.host}${rawUrl}`;
+                } else if (!rawUrl.startsWith('http')) {
+                    return;
+                }
+            } catch { return; }
+            // Skip tiny icons / SVGs / data URIs
+            if (full.endsWith('.svg') || full.startsWith('data:') || full.includes('favicon')) return;
+            if (seen.has(full)) return;
+            seen.add(full);
+            imageUrls.push(full);
+        };
 
-        // Handle relative URLs
-        if (imageUrl.startsWith('/')) {
-            const urlObj = new URL(finalUrl); // Use finalUrl (article url) for base
-            imageUrl = `${urlObj.protocol}//${urlObj.host}${imageUrl}`;
-        }
+        // Priority 1: OG/Twitter image
+        addUrl($('meta[property="og:image"]').attr('content'));
+        addUrl($('meta[name="twitter:image"]').attr('content'));
 
-        console.log("Found reference image:", imageUrl);
-
-        // Fetch the image
-        const imgRes = await fetch(imageUrl, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
+        // Priority 2: Article body images
+        $('article img, .post-content img, .entry-content img, main img, .content img').each((_, el) => {
+            addUrl($(el).attr('src'));
+            addUrl($(el).attr('data-src'));
         });
-        if (!imgRes.ok) return { styleDescription: "", styleOptions: [] };
-        const arrayBuffer = await imgRes.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const base64 = buffer.toString('base64');
-        const mimeType = imgRes.headers.get('content-type') || 'image/jpeg';
 
-        // Analyze with Gemini Multimodal - generate 3 style options
-        const analysisPrompt = `この画像の視覚的スタイルを分析してください。
+        // Priority 3: Any remaining images
+        $('img').each((_, el) => {
+            addUrl($(el).attr('src'));
+        });
 
-以下の情報を日本語で提供してください：
-1. 全体的なスタイルの簡潔な説明（2〜3文。日本語で）
-2. この画像と同様の雰囲気を再現するための3つの異なるスタイル案（JSON配列形式）
+        if (imageUrls.length === 0) return emptyResult;
+
+        console.log(`Found ${imageUrls.length} images from reference media`);
+
+        // --- Fetch images for multimodal analysis ---
+        const fetchPromises = imageUrls.map(async (imgUrl) => {
+            try {
+                const imgRes = await fetch(imgUrl, {
+                    headers: { "User-Agent": "Mozilla/5.0" },
+                    signal: AbortSignal.timeout(5000)
+                });
+                if (!imgRes.ok) return null;
+                const arrayBuffer = await imgRes.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+                // Skip very small images (likely icons)
+                if (buffer.length < 5000) return null;
+                return {
+                    url: imgUrl,
+                    mimeType: imgRes.headers.get('content-type') || 'image/jpeg',
+                    data: buffer.toString('base64')
+                };
+            } catch { return null; }
+        });
+
+        const fetched = (await Promise.all(fetchPromises)).filter(Boolean) as { url: string; mimeType: string; data: string }[];
+        if (fetched.length === 0) return emptyResult;
+
+        // --- Multimodal analysis: send all images to Gemini ---
+        const analysisPrompt = `以下の${fetched.length}枚のブログ記事アイキャッチ画像を分析してください。
+
+【分析タスク】
+1. 全体のスタイル傾向を2〜3文で日本語で要約してください。
+2. 画像群から **3つのテーマパターン** を抽出してください。各パターンは画像生成AIで再現可能な具体的スタイル指示にしてください。
+
+【重要】
+- 各パターンには、どの画像（番号）が該当するか記載すること。
+- descriptionは画像生成AI向けの **英語の詳細スタイル指示** にすること。
 
 Format your response EXACTLY as:
-DESCRIPTION: [ここに2〜3文の日本語の説明]
+DESCRIPTION: [全体スタイルの日本語要約（2〜3文）]
 
 STYLES:
 [
-  {"id": "style1", "label": "[日本語の短いラベル]", "description": "[画像生成AI向けの英語の詳細なスタイル指示。ライティング、色、ムード、構図などを含む]"},
-  {"id": "style2", "label": "[日本語の短いラベル]", "description": "[別のバリエーションの英語記述]"},
-  {"id": "style3", "label": "[日本語の短いラベル]", "description": "[また別のバリエーションの英語記述]"}
-]
+  {"id": "pattern1", "label": "[日本語テーマ名]", "description": "[英語の詳細スタイル指示。色調、照明、構図、テクスチャ、雰囲気を含む]", "matchImages": [1, 3]},
+  {"id": "pattern2", "label": "[日本語テーマ名]", "description": "[英語の詳細スタイル指示]", "matchImages": [2]},
+  {"id": "pattern3", "label": "[日本語テーマ名]", "description": "[英語の詳細スタイル指示]", "matchImages": [4, 5]}
+]`;
 
-Labels examples: "ミニマリスト", "ビビッド", "プロフェッショナル", "手書き風", "3Dイラスト" etc.
-Descriptions (English) should use words like "flat design", "vector art", "minimalist", "illustration" if the image is not photorealistic. If it is a photo, use "photorealistic", "photography".
-`;
-
-        const analysisResult = await generateMultimodal(analysisPrompt, [{ mimeType, data: base64 }]);
+        const multimodalImages = fetched.map(f => ({ mimeType: f.mimeType, data: f.data }));
+        const analysisResult = await generateMultimodal(analysisPrompt, multimodalImages);
 
         // Parse the result
         let styleDescription = "";
@@ -138,27 +173,38 @@ Descriptions (English) should use words like "flat design", "vector art", "minim
         const stylesMatch = analysisResult.match(/STYLES:\s*(\[[\s\S]*?\])/);
         if (stylesMatch) {
             try {
-                styleOptions = JSON.parse(stylesMatch[1]);
+                const parsed = JSON.parse(stylesMatch[1]);
+                styleOptions = parsed.map((opt: any) => {
+                    // Assign the first matching image as thumbnailUrl
+                    const matchIdx = opt.matchImages?.[0];
+                    const thumbnailUrl = matchIdx && fetched[matchIdx - 1] ? fetched[matchIdx - 1].url : fetched[0].url;
+                    return {
+                        id: opt.id,
+                        label: opt.label,
+                        description: opt.description,
+                        thumbnailUrl
+                    };
+                });
             } catch (e) {
                 console.error("Failed to parse style options:", e);
-                // Fallback default options
                 styleOptions = [
-                    { id: "minimal", label: "ミニマリスト", description: "Clean, minimal design with muted colors and simple composition, flat vector art style, no photorealism" },
-                    { id: "vibrant", label: "ビビッド", description: "Vibrant colors with dynamic composition and bold elements, digital illustration style" },
-                    { id: "professional", label: "プロフェッショナル", description: "Professional, polished look with balanced lighting and refined aesthetics, high quality photography or 3D render" }
+                    { id: "minimal", label: "ミニマリスト", description: "Clean, minimal design with muted colors and simple composition, flat vector art style", thumbnailUrl: fetched[0]?.url },
+                    { id: "vibrant", label: "ビビッド", description: "Vibrant colors with dynamic composition and bold elements, digital illustration style", thumbnailUrl: fetched[1]?.url || fetched[0]?.url },
+                    { id: "professional", label: "プロフェッショナル", description: "Professional, polished look with balanced lighting and refined aesthetics", thumbnailUrl: fetched[Math.min(2, fetched.length - 1)]?.url }
                 ];
             }
         }
 
         return {
             styleDescription,
-            imageUrl,
+            imageUrl: fetched[0]?.url,
+            images: fetched.map(f => ({ url: f.url })),
             styleOptions
         };
 
     } catch (e) {
         console.error("Failed to analyze media style:", e);
-        return { styleDescription: "", styleOptions: [] };
+        return { styleDescription: "", images: [], styleOptions: [] };
     }
 }
 
@@ -218,17 +264,25 @@ async function generateDetailedPrompt(
     - 記事文脈: ${eyecatch.surroundingContext || articleContext || "なし"}
     - 指定スタイル: ${style} (${styleDescription})
     ${styleContext ? `
-    【重要】参考メディアのスタイル分析:
+    【最重要】参考メディアのスタイル分析（トンマナ統一プリアンブル）:
     ${styleContext}
     
     ↑ このスタイル（色調、雰囲気、照明、質感、構図）に **完全に合わせて** プロンプトを作成してください。
-    参考メディアの「トンマナ（トーン&マナー）」を絶対に逸脱しないこと。` : ''}
+    ■ 参考メディアの「トンマナ（トーン&マナー）」を絶対に逸脱しないこと。
+    ■ 同一記事内の全てのアイキャッチ画像は **統一されたトンマナ** で生成されます。
+    ■ カラーパレット・照明・雰囲気は全て参考メディアに準拠すること。` : ''}
     - アスペクト比: ${aspectRatio}
+
+    【絶対ルール：人物の描写】
+    ■ **人物が登場する場合、必ず日本人として描写すること。**
+    ■ 黒髪、アジア系の顔立ち、日本人的な体型・服装を指定すること。
+    ■ 「Japanese」「Asian」「black hair」等のキーワードを必ず含めること。
+    ■ 西洋人的な特徴（金髪、青い目、彫りの深い顔）は使用しないこと。
 
     【プロンプト構成ルール】以下の順番で、カンマ区切りで構成すること。
     
     1. **被写体（Subject）**: 
-       - 人物なら: 年齢層、性別、服装（色・素材まで）、髪型、表情、ポーズ、持ち物
+       - 人物なら: 日本人、年齢層、性別、服装（色・素材まで）、黒髪、表情、ポーズ、持ち物
        - 物なら: 形状、色、質感、ブランド感、配置
        
     2. **環境・背景（Environment）**:
@@ -263,8 +317,9 @@ async function generateDetailedPrompt(
     【出力形式】
     - **日本語でプロンプトを出力**すること（英語ではなく）
     - 文章ではなく、キーワードとフレーズをカンマで区切る
+    - 人物が含まれる場合は必ず「日本人」「黒髪」を明記
     - 抽象的な概念は具体的なビジュアルに変換すること
-      例：「成功」→「高層ビルの窓から朝日を眺める30代男性CEOの後ろ姿」
+      例：「成功」→「高層ビルの窓から朝日を眺める30代日本人男性CEOの後ろ姿、黒髪短髪」
     - 最後にMidjourney用パラメータを追加: --ar ${aspectRatio} --v 6.0 --q 2
 
     プロンプト:`;
@@ -300,6 +355,7 @@ export async function POST(req: NextRequest) {
                 if (analysisResult.styleDescription || analysisResult.styleOptions.length > 0) {
                     analyzedMedia = {
                         imageUrl: analysisResult.imageUrl || "",
+                        images: analysisResult.images || [],
                         styleDescription: analysisResult.styleDescription,
                         styleOptions: analysisResult.styleOptions
                     };
