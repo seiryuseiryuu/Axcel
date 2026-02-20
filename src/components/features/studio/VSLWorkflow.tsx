@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Loader2, Sparkles, Users, ListChecks, FileText, Check, PenTool, MessageSquare, Send, Table2 } from "lucide-react";
+import { Loader2, Sparkles, Users, FileText, Check, MessageSquare, Send, Table2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import {
@@ -20,8 +20,8 @@ import { RefinementArea } from "@/components/features/studio/RefinementArea";
 
 const STEPS = [
     { num: 1, title: "ターゲット", icon: Users },
-    { num: 2, title: "企画決定", icon: Sparkles },
-    { num: 3, title: "詳細ヒアリング", icon: MessageSquare },
+    { num: 2, title: "詳細ヒアリング", icon: MessageSquare },
+    { num: 3, title: "企画決定", icon: Sparkles },
     { num: 4, title: "構成作成", icon: Table2 },
     { num: 5, title: "執筆", icon: FileText },
 ];
@@ -39,17 +39,17 @@ export function VSLWorkflow() {
         urgencyReason: "",
     });
 
-    // STEP 2: Campaign Proposals
-    const [referenceCopies, setReferenceCopies] = useState("");
-    const [campaigns, setCampaigns] = useState<CampaignProposal[]>([]);
-    const [selectedCampaign, setSelectedCampaign] = useState<CampaignProposal | null>(null);
-
-    // STEP 3: Detailed Hearing (Chat)
+    // STEP 2: Detailed Hearing (Chat) — 企画決定の前
     const [chatHistory, setChatHistory] = useState<{ role: "user" | "ai"; text: string }[]>([]);
     const [chatInput, setChatInput] = useState("");
     const [hearingComplete, setHearingComplete] = useState(false);
     const [gatheredInfo, setGatheredInfo] = useState<Record<string, string>>({});
     const chatEndRef = useRef<HTMLDivElement>(null);
+
+    // STEP 3: Campaign Proposals — ヒアリング後
+    const [referenceCopies, setReferenceCopies] = useState("");
+    const [campaigns, setCampaigns] = useState<CampaignProposal[]>([]);
+    const [selectedCampaign, setSelectedCampaign] = useState<CampaignProposal | null>(null);
 
     // STEP 4: Structure
     const [structure, setStructure] = useState("");
@@ -61,32 +61,14 @@ export function VSLWorkflow() {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatHistory]);
 
-    // --- STEP 1 → STEP 2 ---
-    const handleGenerateCampaigns = () => {
+    // --- STEP 1 → STEP 2: ヒアリング開始 ---
+    const handleStartHearing = () => {
         if (!hearing1.worstScenario || !hearing1.desiredFuture) {
             toast({ title: "「最悪の情景」と「欲しい未来」は必須です", variant: "destructive" });
             return;
         }
         startTransition(async () => {
-            const result = await generateVslCampaigns(hearing1, referenceCopies);
-            if (result.success && result.data) {
-                if (Array.isArray(result.data)) {
-                    setCampaigns(result.data);
-                }
-                setStep(2);
-                toast({ title: "企画案を3パターン作成しました" });
-            } else {
-                toast({ title: "エラー", description: result.error, variant: "destructive" });
-            }
-        });
-    };
-
-    // --- STEP 2 → STEP 3 ---
-    const handleSelectCampaign = (campaign: CampaignProposal) => {
-        setSelectedCampaign(campaign);
-        // Start hearing with initial AI message
-        startTransition(async () => {
-            const result = await conductVslHearing(hearing1, campaign, [], "（ヒアリング開始）");
+            const result = await conductVslHearing(hearing1, [], "（ヒアリング開始）");
             if (result.success && result.data) {
                 setChatHistory([{ role: "ai", text: result.data.message }]);
                 if (result.data.gatheredInfo) {
@@ -98,23 +80,24 @@ export function VSLWorkflow() {
                         return updated;
                     });
                 }
-                setStep(3);
+                setStep(2);
+                toast({ title: "詳細ヒアリングを開始します" });
             } else {
                 toast({ title: "エラー", description: result.error, variant: "destructive" });
             }
         });
     };
 
-    // --- STEP 3: Chat ---
+    // --- STEP 2: Chat ---
     const handleSendChat = () => {
-        if (!chatInput.trim() || !selectedCampaign) return;
+        if (!chatInput.trim()) return;
         const userMsg = chatInput.trim();
         setChatInput("");
         const newHistory = [...chatHistory, { role: "user" as const, text: userMsg }];
         setChatHistory(newHistory);
 
         startTransition(async () => {
-            const result = await conductVslHearing(hearing1, selectedCampaign, newHistory, userMsg);
+            const result = await conductVslHearing(hearing1, newHistory, userMsg);
             if (result.success && result.data) {
                 setChatHistory(prev => [...prev, { role: "ai" as const, text: result.data.message }]);
                 if (result.data.isComplete) {
@@ -135,7 +118,23 @@ export function VSLWorkflow() {
         });
     };
 
-    // --- STEP 3 → STEP 4 ---
+    // --- STEP 2 → STEP 3: 企画案を生成 ---
+    const handleGenerateCampaigns = () => {
+        startTransition(async () => {
+            const result = await generateVslCampaigns(hearing1, referenceCopies, gatheredInfo);
+            if (result.success && result.data) {
+                if (Array.isArray(result.data)) {
+                    setCampaigns(result.data);
+                }
+                setStep(3);
+                toast({ title: "企画案を3パターン作成しました" });
+            } else {
+                toast({ title: "エラー", description: result.error, variant: "destructive" });
+            }
+        });
+    };
+
+    // --- STEP 3 → STEP 4: 構成作成 ---
     const handleGenerateStructure = () => {
         if (!selectedCampaign) return;
         startTransition(async () => {
@@ -150,7 +149,7 @@ export function VSLWorkflow() {
         });
     };
 
-    // --- STEP 4 → STEP 5 ---
+    // --- STEP 4 → STEP 5: 執筆 ---
     const handleWriteScript = () => {
         if (!selectedCampaign) return;
         startTransition(async () => {
@@ -158,7 +157,6 @@ export function VSLWorkflow() {
             if (result.success && result.data) {
                 setFinalScript(result.data);
 
-                // Save to History
                 import("@/app/actions/history").then(({ saveCreation }) => {
                     saveCreation(
                         `VSL台本: ${selectedCampaign.title.slice(0, 30)}`,
@@ -253,86 +251,19 @@ export function VSLWorkflow() {
                             />
                         </div>
 
-                        <div className="border-t pt-6 space-y-2">
-                            <Label>参考コピー（任意）</Label>
-                            <p className="text-xs text-muted-foreground">
-                                note、Brain等の教材販売サイト・Web広告・競合のキャッチコピーをいくつか貼り付けてください。
-                                これらを分析して企画案に反映します。
-                            </p>
-                            <Textarea
-                                placeholder={"例:\n・「たった3ステップで月収100万円の仕組みを作る方法」\n・「97%の人が知らない〇〇の裏技」\n・「これを知らないと一生損する△△の真実」"}
-                                value={referenceCopies}
-                                onChange={e => setReferenceCopies(e.target.value)}
-                                className="min-h-[120px]"
-                            />
-                        </div>
-
-                        <Button className="w-full" size="lg" onClick={handleGenerateCampaigns} disabled={isPending}>
-                            {isPending ? <Loader2 className="animate-spin mr-2" /> : <Sparkles className="mr-2" />}
-                            企画案を3パターン作成
+                        <Button className="w-full" size="lg" onClick={handleStartHearing} disabled={isPending}>
+                            {isPending ? <Loader2 className="animate-spin mr-2" /> : <MessageSquare className="mr-2" />}
+                            詳細ヒアリングを開始
                         </Button>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* ===== STEP 2: 企画決定 ===== */}
+            {/* ===== STEP 2: 詳細ヒアリング（チャット） ===== */}
             <div className={step === 2 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
                 <Card>
                     <CardHeader>
-                        <CardTitle>STEP 2: 企画決定</CardTitle>
-                        <CardDescription>3つの企画案から、最も適したものを選んでください。</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        {campaigns.map((c) => (
-                            <div
-                                key={c.id}
-                                className={`border rounded-lg p-5 cursor-pointer transition-all hover:border-primary/50 hover:bg-primary/5 ${
-                                    selectedCampaign?.id === c.id ? "border-primary bg-primary/10 ring-2 ring-primary/30" : ""
-                                }`}
-                                onClick={() => setSelectedCampaign(c)}
-                            >
-                                <div className="flex items-start justify-between gap-4">
-                                    <div className="flex-1 min-w-0">
-                                        <h3 className="font-bold text-lg mb-1">{c.title}</h3>
-                                        <p className="text-sm text-muted-foreground mb-3">{c.concept}</p>
-                                        <div className="flex flex-wrap gap-1.5 mb-2">
-                                            {c.elements.map((el, i) => (
-                                                <span key={i} className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                                                    {el}
-                                                </span>
-                                            ))}
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">{c.reasoning}</p>
-                                    </div>
-                                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 mt-1 ${
-                                        selectedCampaign?.id === c.id ? "border-primary bg-primary text-primary-foreground" : "border-muted"
-                                    }`}>
-                                        {selectedCampaign?.id === c.id && <Check className="w-3.5 h-3.5" />}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-
-                        <div className="flex gap-4 pt-4">
-                            <Button variant="outline" onClick={() => setStep(1)}>戻る</Button>
-                            <Button
-                                className="flex-1"
-                                onClick={() => selectedCampaign && handleSelectCampaign(selectedCampaign)}
-                                disabled={!selectedCampaign || isPending}
-                            >
-                                {isPending ? <Loader2 className="animate-spin mr-2" /> : <MessageSquare className="mr-2" />}
-                                この企画で詳細ヒアリングへ
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* ===== STEP 3: 詳細ヒアリング（チャット） ===== */}
-            <div className={step === 3 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>STEP 3: 詳細ヒアリング</CardTitle>
+                        <CardTitle>STEP 2: 詳細ヒアリング</CardTitle>
                         <CardDescription>
                             AIが台本に必要な情報を対話形式でヒアリングします。質問に答えてください。
                         </CardDescription>
@@ -386,16 +317,84 @@ export function VSLWorkflow() {
                         </div>
                         <p className="text-[10px] text-muted-foreground">Ctrl+Enter で送信</p>
 
-                        {/* Proceed to Structure */}
-                        <div className="flex gap-4 pt-2">
+                        {/* Reference Copies + Proceed */}
+                        <div className="border-t pt-4 space-y-3">
+                            <div className="space-y-2">
+                                <Label>参考コピー（任意）</Label>
+                                <p className="text-xs text-muted-foreground">
+                                    note、Brain等の教材販売サイト・Web広告・競合のキャッチコピーをいくつか貼り付けてください。
+                                    これらを分析して企画案に反映します。
+                                </p>
+                                <Textarea
+                                    placeholder={"例:\n・「たった3ステップで月収100万円の仕組みを作る方法」\n・「97%の人が知らない〇〇の裏技」"}
+                                    value={referenceCopies}
+                                    onChange={e => setReferenceCopies(e.target.value)}
+                                    className="min-h-[80px]"
+                                />
+                            </div>
+                            <div className="flex gap-4">
+                                <Button variant="outline" onClick={() => setStep(1)}>戻る</Button>
+                                <Button
+                                    className="flex-1"
+                                    onClick={handleGenerateCampaigns}
+                                    disabled={isPending || chatHistory.length < 2}
+                                >
+                                    {isPending ? <Loader2 className="animate-spin mr-2" /> : <Sparkles className="mr-2" />}
+                                    {hearingComplete ? "企画案を3パターン作成" : "ヒアリング途中だけど企画案を作成"}
+                                </Button>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* ===== STEP 3: 企画決定 ===== */}
+            <div className={step === 3 ? "block space-y-6 animate-in slide-in-from-right-4 fade-in" : "hidden"}>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>STEP 3: 企画決定</CardTitle>
+                        <CardDescription>3つの企画案から、最も適したものを選んでください。</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        {campaigns.map((c) => (
+                            <div
+                                key={c.id}
+                                className={`border rounded-lg p-5 cursor-pointer transition-all hover:border-primary/50 hover:bg-primary/5 ${
+                                    selectedCampaign?.id === c.id ? "border-primary bg-primary/10 ring-2 ring-primary/30" : ""
+                                }`}
+                                onClick={() => setSelectedCampaign(c)}
+                            >
+                                <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 min-w-0">
+                                        <h3 className="font-bold text-lg mb-1">{c.title}</h3>
+                                        <p className="text-sm text-muted-foreground mb-3">{c.concept}</p>
+                                        <div className="flex flex-wrap gap-1.5 mb-2">
+                                            {c.elements.map((el, i) => (
+                                                <span key={i} className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                                                    {el}
+                                                </span>
+                                            ))}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">{c.reasoning}</p>
+                                    </div>
+                                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 mt-1 ${
+                                        selectedCampaign?.id === c.id ? "border-primary bg-primary text-primary-foreground" : "border-muted"
+                                    }`}>
+                                        {selectedCampaign?.id === c.id && <Check className="w-3.5 h-3.5" />}
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+
+                        <div className="flex gap-4 pt-4">
                             <Button variant="outline" onClick={() => setStep(2)}>戻る</Button>
                             <Button
                                 className="flex-1"
                                 onClick={handleGenerateStructure}
-                                disabled={isPending || chatHistory.length < 2}
+                                disabled={!selectedCampaign || isPending}
                             >
                                 {isPending ? <Loader2 className="animate-spin mr-2" /> : <Table2 className="mr-2" />}
-                                {hearingComplete ? "構成を作成する" : "ヒアリング途中だけど構成を作成する"}
+                                この企画で構成を作成する
                             </Button>
                         </div>
                     </CardContent>

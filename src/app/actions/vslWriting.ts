@@ -18,20 +18,25 @@ export type CampaignProposal = {
     reasoning: string;
 };
 
-// --- STEP 2: Generate 3 Campaign Proposals ---
+// --- STEP 3: Generate 3 Campaign Proposals (詳細ヒアリング後) ---
 export async function generateVslCampaigns(
     hearing1: Hearing1Data,
-    referenceCopies: string
+    referenceCopies: string,
+    gatheredInfo?: Record<string, string>
 ) {
+    const hearingContext = gatheredInfo && Object.keys(gatheredInfo).length > 0
+        ? `\n【詳細ヒアリング結果（STEP2で収集済み）】\n${Object.entries(gatheredInfo).map(([k, v]) => `■ ${k}: ${v}`).join("\n")}\n`
+        : "";
+
     const prompt = `あなたは日本トップクラスのVSL（ビデオセールスレター）プロデューサーです。
-以下のターゲット情報と参考コピーを分析し、ターゲットが思わず飛びつく企画案を3パターン作成してください。
+以下のターゲット情報・詳細ヒアリング結果・参考コピーを分析し、ターゲットが思わず飛びつく企画案を3パターン作成してください。
 
 【ターゲット情報（STEP1ヒアリング結果）】
 ■ 最悪の情景: ${hearing1.worstScenario}
 ■ 失敗した既存手法: ${hearing1.failedMethods}
 ■ 喉から手が出るほど欲しい未来: ${hearing1.desiredFuture}
 ■ 今見るべき理由: ${hearing1.urgencyReason}
-
+${hearingContext}
 【参考コピー（note/Brain/Web広告/競合等から収集）】
 ${referenceCopies || "（参考コピーなし — 独自に最適な企画を提案してください）"}
 
@@ -96,10 +101,9 @@ ${referenceCopies || "（参考コピーなし — 独自に最適な企画を�
     }
 }
 
-// --- STEP 3: Dynamic AI Hearing (Chat) ---
+// --- STEP 2: Dynamic AI Hearing (Chat) --- (企画決定の前に実施)
 export async function conductVslHearing(
     hearing1: Hearing1Data,
-    selectedCampaign: CampaignProposal,
     chatHistory: { role: "user" | "ai"; text: string }[],
     userMessage: string
 ) {
@@ -115,10 +119,6 @@ export async function conductVslHearing(
 ■ 失敗した既存手法: ${hearing1.failedMethods}
 ■ 欲しい未来: ${hearing1.desiredFuture}
 ■ 今見るべき理由: ${hearing1.urgencyReason}
-
-【選ばれた企画】
-タイトル: ${selectedCampaign.title}
-コンセプト: ${selectedCampaign.concept}
 
 【ヒアリングで取りたい情報リスト】
 以下の項目のうち、まだ聞けていないものを優先して質問してください：
@@ -144,7 +144,7 @@ ${userMessage}
 - 1回の応答で質問は1〜2個に絞る（質問攻めにしない）
 - ユーザーの回答を受け止めてから次の質問に移る
 - 具体的なエピソードを引き出す質問をする
-- すべての項目が埋まったら「ヒアリング完了です！次のステップ（構成作成）に進みましょう。」と伝える
+- すべての項目が埋まったら「ヒアリング完了です！次のステップ（企画決定）に進みましょう。」と伝える
 - まだ聞くべき項目がある場合は、自然な流れで次の質問をする
 - 応答はフレンドリーかつプロフェッショナルに
 
