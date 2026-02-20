@@ -322,48 +322,66 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                         {/* Analyzed Style Options (from media analysis) */}
                         {state.analyzedMedia?.styleOptions && state.analyzedMedia.styleOptions.length > 0 && (
                             <div className="space-y-3">
-                                <div className="flex flex-col md:flex-row gap-3 mb-2">
-                                    {state.analyzedMedia.imageUrl && (
-                                        <img
-                                            src={state.analyzedMedia.imageUrl}
-                                            alt="Reference"
-                                            className="h-20 w-auto object-cover rounded-md border"
-                                            onError={(e) => (e.currentTarget.style.display = 'none')}
-                                        />
-                                    )}
-                                    <div>
-                                        <Label className="text-xs font-semibold flex items-center gap-1 mb-1">
-                                            <Sparkles className="h-3 w-3" />
-                                            参照メディアから抽出されたスタイル
+                                {/* Multi-image gallery strip */}
+                                {state.analyzedMedia.images && state.analyzedMedia.images.length > 0 && (
+                                    <div className="space-y-1">
+                                        <Label className="text-xs font-semibold flex items-center gap-1">
+                                            <ImageIcon className="h-3 w-3" />
+                                            参照メディアから取得した画像（{state.analyzedMedia.images.length}枚）
                                         </Label>
-                                        <p className="text-xs text-muted-foreground">
-                                            {state.analyzedMedia.styleDescription}
-                                        </p>
+                                        <div className="flex gap-2 overflow-x-auto py-2">
+                                            {state.analyzedMedia.images.map((img, idx) => (
+                                                <img
+                                                    key={idx}
+                                                    src={img.url}
+                                                    alt={`Reference ${idx + 1}`}
+                                                    className="h-16 w-auto object-cover rounded-md border shrink-0"
+                                                    onError={(e) => (e.currentTarget.style.display = 'none')}
+                                                />
+                                            ))}
+                                        </div>
                                     </div>
+                                )}
+
+                                <div>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                        {state.analyzedMedia.styleDescription}
+                                    </p>
                                 </div>
-                                <Label>スタイルを選択</Label>
+                                <Label>テーマパターンを選択</Label>
                                 <div className="grid gap-3 md:grid-cols-3">
                                     {state.analyzedMedia.styleOptions.map((opt) => (
                                         <div
                                             key={opt.id}
-                                            className={`p-4 border rounded-lg cursor-pointer transition-all ${state.selectedStyleDescription === opt.description
+                                            className={`border rounded-lg cursor-pointer transition-all overflow-hidden ${state.selectedStyleDescription === opt.description
                                                 ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                                                 : 'hover:border-primary/50 hover:bg-muted/50'
                                                 }`}
                                             onClick={() => updateState({ selectedStyleDescription: opt.description })}
                                         >
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${state.selectedStyleDescription === opt.description
-                                                    ? 'border-primary bg-primary'
-                                                    : 'border-muted-foreground'
-                                                    }`}>
-                                                    {state.selectedStyleDescription === opt.description && (
-                                                        <Check className="h-3 w-3 text-primary-foreground" />
-                                                    )}
+                                            {/* Thumbnail preview */}
+                                            {opt.thumbnailUrl && (
+                                                <img
+                                                    src={opt.thumbnailUrl}
+                                                    alt={opt.label}
+                                                    className="w-full h-24 object-cover"
+                                                    onError={(e) => (e.currentTarget.style.display = 'none')}
+                                                />
+                                            )}
+                                            <div className="p-3">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${state.selectedStyleDescription === opt.description
+                                                        ? 'border-primary bg-primary'
+                                                        : 'border-muted-foreground'
+                                                        }`}>
+                                                        {state.selectedStyleDescription === opt.description && (
+                                                            <Check className="h-3 w-3 text-primary-foreground" />
+                                                        )}
+                                                    </div>
+                                                    <span className="font-medium text-sm">{opt.label}</span>
                                                 </div>
-                                                <span className="font-medium text-sm">{opt.label}</span>
+                                                <p className="text-xs text-muted-foreground line-clamp-3">{opt.description}</p>
                                             </div>
-                                            <p className="text-xs text-muted-foreground line-clamp-3">{opt.description}</p>
                                         </div>
                                     ))}
                                 </div>
@@ -506,24 +524,27 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                     <CardContent className="space-y-4">
                         {/* Reference Image Analysis Result */}
                         {state.analyzedMedia && (
-                            <div className="bg-muted/50 border rounded-lg p-4 flex flex-col md:flex-row gap-4">
-                                <div className="shrink-0">
-                                    <img
-                                        src={state.analyzedMedia.imageUrl}
-                                        alt="Reference"
-                                        className="h-24 w-auto object-cover rounded-md border"
-                                        onError={(e) => (e.currentTarget.style.display = 'none')}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-xs font-semibold flex items-center gap-1">
-                                        <ImageIcon className="h-3 w-3" />
-                                        参照メディアのスタイル分析
-                                    </Label>
-                                    <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-                                        {state.analyzedMedia.styleDescription}
-                                    </p>
-                                </div>
+                            <div className="bg-muted/50 border rounded-lg p-4 space-y-3">
+                                <Label className="text-xs font-semibold flex items-center gap-1">
+                                    <ImageIcon className="h-3 w-3" />
+                                    参照メディアのスタイル分析
+                                </Label>
+                                {state.analyzedMedia.images && state.analyzedMedia.images.length > 0 && (
+                                    <div className="flex gap-2 overflow-x-auto">
+                                        {state.analyzedMedia.images.map((img, idx) => (
+                                            <img
+                                                key={idx}
+                                                src={img.url}
+                                                alt={`Reference ${idx + 1}`}
+                                                className="h-16 w-auto object-cover rounded-md border shrink-0"
+                                                onError={(e) => (e.currentTarget.style.display = 'none')}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                                <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+                                    {state.analyzedMedia.styleDescription}
+                                </p>
                             </div>
                         )}
 
