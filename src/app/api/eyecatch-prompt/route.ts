@@ -142,7 +142,18 @@ async function analyzeMediaStyle(url: string): Promise<MediaAnalysisResult> {
 
 【分析タスク】
 1. 全体のスタイル傾向を2〜3文で日本語で要約してください。
-2. 画像群から **3つのテーマパターン** を抽出してください。各パターンは画像生成AIで再現可能な具体的スタイル指示にしてください。
+2. 画像群を **視覚的な類似性** に基づいて **3つのテーマパターン** にグルーピングしてください。
+
+【グルーピングの基準】
+以下の視覚要素の類似性でグループ分けすること：
+- 色調・カラーパレット（暖色系/寒色系/モノトーン など）
+- イラストスタイル（フラット/3D/写真風/アニメ風 など）
+- 構図・レイアウト（人物中心/テキスト中心/アイコンベース など）
+- 雰囲気・トーン（カジュアル/ビジネス/ポップ など）
+
+★ 各画像を必ずいずれか1つのパターンに割り当てること
+★ 1つのパターンに複数の画像が属しても構わない
+★ 全く異なるスタイルの画像が同じパターンに入らないように注意
 
 【重要】
 - 各パターンには、どの画像（番号）が該当するか記載すること。
@@ -175,22 +186,28 @@ STYLES:
             try {
                 const parsed = JSON.parse(stylesMatch[1]);
                 styleOptions = parsed.map((opt: any) => {
-                    // Assign the first matching image as thumbnailUrl
-                    const matchIdx = opt.matchImages?.[0];
-                    const thumbnailUrl = matchIdx && fetched[matchIdx - 1] ? fetched[matchIdx - 1].url : fetched[0].url;
+                    // Collect ALL matching image URLs for this pattern
+                    const matchIndices: number[] = opt.matchImages || [];
+                    const thumbnailUrls = matchIndices
+                        .map((idx: number) => fetched[idx - 1]?.url)
+                        .filter(Boolean) as string[];
+                    // Fallback: if no matches, use first image
+                    if (thumbnailUrls.length === 0 && fetched.length > 0) {
+                        thumbnailUrls.push(fetched[0].url);
+                    }
                     return {
                         id: opt.id,
                         label: opt.label,
                         description: opt.description,
-                        thumbnailUrl
+                        thumbnailUrls
                     };
                 });
             } catch (e) {
                 console.error("Failed to parse style options:", e);
                 styleOptions = [
-                    { id: "minimal", label: "ミニマリスト", description: "Clean, minimal design with muted colors and simple composition, flat vector art style", thumbnailUrl: fetched[0]?.url },
-                    { id: "vibrant", label: "ビビッド", description: "Vibrant colors with dynamic composition and bold elements, digital illustration style", thumbnailUrl: fetched[1]?.url || fetched[0]?.url },
-                    { id: "professional", label: "プロフェッショナル", description: "Professional, polished look with balanced lighting and refined aesthetics", thumbnailUrl: fetched[Math.min(2, fetched.length - 1)]?.url }
+                    { id: "minimal", label: "ミニマリスト", description: "Clean, minimal design with muted colors and simple composition, flat vector art style", thumbnailUrls: fetched[0] ? [fetched[0].url] : [] },
+                    { id: "vibrant", label: "ビビッド", description: "Vibrant colors with dynamic composition and bold elements, digital illustration style", thumbnailUrls: fetched[1] ? [fetched[1].url] : fetched[0] ? [fetched[0].url] : [] },
+                    { id: "professional", label: "プロフェッショナル", description: "Professional, polished look with balanced lighting and refined aesthetics", thumbnailUrls: fetched[2] ? [fetched[2].url] : fetched[0] ? [fetched[0].url] : [] }
                 ];
             }
         }
@@ -374,22 +391,24 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ success: false, error: "画像説明が選択されていません" }, { status: 400 });
             }
 
-            // Use selectedStyleDescription from client if provided (from previous analysis)
-            // Otherwise fall back to re-analyzing or no style context
-            let styleContext = "";
-            const { selectedStyleDescription } = body;
+            // Use per-eyecatch styles if provided, otherwise fall back to global style
+            const { selectedStyleDescription, perEyecatchStyles } = body;
+            let globalStyleContext = "";
 
             if (selectedStyleDescription && typeof selectedStyleDescription === 'string') {
-                styleContext = selectedStyleDescription;
+                globalStyleContext = selectedStyleDescription;
             } else if (mediaUrl && typeof mediaUrl === 'string' && mediaUrl.startsWith('http')) {
-                // Fallback: re-analyze if no style was pre-selected
                 const analysisResult = await analyzeMediaStyle(mediaUrl);
-                styleContext = analysisResult.styleDescription;
+                globalStyleContext = analysisResult.styleDescription;
             }
 
             const generatedPrompts: GeneratedPrompt[] = [];
 
             for (const eyecatch of eyecatches as ExtractedEyecatch[]) {
+                // Per-eyecatch style takes priority over global
+                const perStyle = perEyecatchStyles?.[eyecatch.index];
+                const styleContext = (perStyle && typeof perStyle === 'string') ? perStyle : globalStyleContext;
+
                 const detailedPrompt = await generateDetailedPrompt(
                     eyecatch,
                     style as ImageStyle || 'photorealistic',

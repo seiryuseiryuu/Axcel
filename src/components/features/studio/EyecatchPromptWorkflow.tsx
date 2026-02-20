@@ -89,7 +89,14 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
 
                 // Auto-select first style option if available
                 if (data.analyzedMedia?.styleOptions?.length > 0) {
-                    updateState({ selectedStyleDescription: data.analyzedMedia.styleOptions[0].description });
+                    const defaultStyle = data.analyzedMedia.styleOptions[0].description;
+                    updateState({ selectedStyleDescription: defaultStyle });
+                    // Initialize all eyecatches with the default theme
+                    const initialPerStyles: Record<number, string> = {};
+                    extracted.forEach((e: ExtractedEyecatch) => {
+                        initialPerStyles[e.index] = defaultStyle;
+                    });
+                    updateState({ perEyecatchStyles: initialPerStyles });
                 }
             } else {
                 setErrorMessage(data.error || "抽出に失敗しました");
@@ -123,7 +130,8 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                     style: state.selectedStyle,
                     aspectRatio: state.selectedAspectRatio,
                     mediaUrl: state.mediaUrl,
-                    selectedStyleDescription: state.selectedStyleDescription, // Send selected style from analysis
+                    selectedStyleDescription: state.selectedStyleDescription,
+                    perEyecatchStyles: state.perEyecatchStyles,
                 }),
             });
 
@@ -357,16 +365,29 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                                                 ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                                                 : 'hover:border-primary/50 hover:bg-muted/50'
                                                 }`}
-                                            onClick={() => updateState({ selectedStyleDescription: opt.description })}
+                                            onClick={() => {
+                                                updateState({ selectedStyleDescription: opt.description });
+                                                // Update all eyecatches without individual overrides
+                                                const newPerStyles = { ...state.perEyecatchStyles };
+                                                state.extractedEyecatches.forEach(e => {
+                                                    newPerStyles[e.index] = opt.description;
+                                                });
+                                                updateState({ perEyecatchStyles: newPerStyles });
+                                            }}
                                         >
-                                            {/* Thumbnail preview */}
-                                            {opt.thumbnailUrl && (
-                                                <img
-                                                    src={opt.thumbnailUrl}
-                                                    alt={opt.label}
-                                                    className="w-full h-24 object-cover"
-                                                    onError={(e) => (e.currentTarget.style.display = 'none')}
-                                                />
+                                            {/* Multi-thumbnail strip for grouped images */}
+                                            {opt.thumbnailUrls && opt.thumbnailUrls.length > 0 && (
+                                                <div className="flex gap-0.5 overflow-hidden h-24 bg-muted/30">
+                                                    {opt.thumbnailUrls.map((url, imgIdx) => (
+                                                        <img
+                                                            key={imgIdx}
+                                                            src={url}
+                                                            alt={`${opt.label} ${imgIdx + 1}`}
+                                                            className="h-24 flex-1 min-w-0 object-cover"
+                                                            onError={(e) => (e.currentTarget.style.display = 'none')}
+                                                        />
+                                                    ))}
+                                                </div>
                                             )}
                                             <div className="p-3">
                                                 <div className="flex items-center gap-2 mb-1">
@@ -379,6 +400,7 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                                                         )}
                                                     </div>
                                                     <span className="font-medium text-sm">{opt.label}</span>
+                                                    <Badge variant="outline" className="text-xs">{opt.thumbnailUrls?.length || 0}枚</Badge>
                                                 </div>
                                                 <p className="text-xs text-muted-foreground line-clamp-3">{opt.description}</p>
                                             </div>
@@ -445,32 +467,57 @@ export function EyecatchPromptWorkflow({ onError }: EyecatchPromptWorkflowProps)
                                         <tr>
                                             <th className="px-4 py-3 w-[50px]">選択</th>
                                             <th className="px-4 py-3 w-[80px]">No.</th>
-                                            <th className="px-4 py-3 w-[150px]">セクション</th>
+                                            <th className="px-4 py-3 w-[120px]">セクション</th>
                                             <th className="px-4 py-3">画像説明（AI抽出）</th>
+                                            {state.analyzedMedia?.styleOptions && state.analyzedMedia.styleOptions.length > 0 && (
+                                                <th className="px-4 py-3 w-[160px]">テーマ</th>
+                                            )}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y">
                                         {state.extractedEyecatches.map((eyecatch) => (
                                             <tr
                                                 key={eyecatch.index}
-                                                className={`hover:bg-muted/50 cursor-pointer transition-colors ${selectedIndices.includes(eyecatch.index) ? 'bg-primary/5' : ''}`}
-                                                onClick={() => toggleSelection(eyecatch.index)}
+                                                className={`hover:bg-muted/50 transition-colors ${selectedIndices.includes(eyecatch.index) ? 'bg-primary/5' : ''}`}
                                             >
-                                                <td className="px-4 py-3">
+                                                <td className="px-4 py-3" onClick={() => toggleSelection(eyecatch.index)}>
                                                     <Checkbox
                                                         checked={selectedIndices.includes(eyecatch.index)}
                                                         onCheckedChange={() => toggleSelection(eyecatch.index)}
                                                     />
                                                 </td>
-                                                <td className="px-4 py-3">
+                                                <td className="px-4 py-3" onClick={() => toggleSelection(eyecatch.index)}>
                                                     <Badge variant="secondary">#{eyecatch.index + 1}</Badge>
                                                 </td>
-                                                <td className="px-4 py-3 text-muted-foreground">
+                                                <td className="px-4 py-3 text-muted-foreground" onClick={() => toggleSelection(eyecatch.index)}>
                                                     {eyecatch.sectionTitle || "-"}
                                                 </td>
-                                                <td className="px-4 py-3 font-medium">
+                                                <td className="px-4 py-3 font-medium" onClick={() => toggleSelection(eyecatch.index)}>
                                                     {eyecatch.description}
                                                 </td>
+                                                {state.analyzedMedia?.styleOptions && state.analyzedMedia.styleOptions.length > 0 && (
+                                                    <td className="px-4 py-3">
+                                                        <Select
+                                                            value={state.perEyecatchStyles[eyecatch.index] || state.selectedStyleDescription || ''}
+                                                            onValueChange={(v) => {
+                                                                const newPerStyles = { ...state.perEyecatchStyles };
+                                                                newPerStyles[eyecatch.index] = v;
+                                                                updateState({ perEyecatchStyles: newPerStyles });
+                                                            }}
+                                                        >
+                                                            <SelectTrigger className="h-8 text-xs">
+                                                                <SelectValue placeholder="テーマ" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {state.analyzedMedia.styleOptions.map(opt => (
+                                                                    <SelectItem key={opt.id} value={opt.description}>
+                                                                        <span className="text-xs">{opt.label}</span>
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </td>
+                                                )}
                                             </tr>
                                         ))}
                                     </tbody>

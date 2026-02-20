@@ -260,6 +260,7 @@ JSON配列のみ。
 
         // Build Markdown
         let markdown = `**${processedCandidates.length} 件の切り抜き候補** が見つかりました（指定尺: ${clipLengthSeconds}秒前後）\n\n`;
+        markdown += `> ※開始タイムコード、終了タイムコードにはズレが生じる場合があります。必ず自身で確認してください。\n\n`;
         markdown += `---\n\n`;
 
         processedCandidates.forEach((c, i) => {

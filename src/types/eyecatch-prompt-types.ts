@@ -42,7 +42,7 @@ export interface StyleOption {
     id: string;
     label: string;
     description: string;
-    thumbnailUrl?: string; // パターンの代表画像URL
+    thumbnailUrls: string[]; // このテーマに属する画像URL群
 }
 
 export interface AnalyzedMedia {
@@ -61,7 +61,8 @@ export interface EyecatchPromptState {
     generatedPrompts: GeneratedPrompt[];
     mediaUrl?: string;
     analyzedMedia?: AnalyzedMedia;
-    selectedStyleDescription?: string; // 選択されたスタイルオプションの説明
+    selectedStyleDescription?: string; // グローバルデフォルトのスタイル
+    perEyecatchStyles: Record<number, string>; // index → styleDescription（個別テーマ選択）
 }
 
 export const initialEyecatchPromptState: EyecatchPromptState = {
@@ -72,4 +73,5 @@ export const initialEyecatchPromptState: EyecatchPromptState = {
     selectedAspectRatio: '16:9',
     generatedPrompts: [],
     mediaUrl: '',
+    perEyecatchStyles: {},
 };
