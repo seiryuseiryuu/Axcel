@@ -45,17 +45,6 @@ function timecodeToSeconds(tc: string): number | null {
     return null;
 }
 
-// --- Helper: Format seconds back to timecode ---
-function secondsToTimecode(totalSec: number): string {
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    if (h > 0) {
-        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    }
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
 // --- Clip candidate interface ---
 interface ClipCandidate {
     startTime: string;
@@ -65,9 +54,10 @@ interface ClipCandidate {
     theme: string;
     summary: string;
     durationSec?: number;
+    keyPoints?: string[];
 }
 
-// --- STEP 4: Extract clip candidates ---
+// --- STEP 4: Extract clip candidates (Two-Phase Approach) ---
 export async function extractClipCandidates(
     correctedSubtitles: string,
     clipLengthSeconds: number
@@ -75,120 +65,173 @@ export async function extractClipCandidates(
     const minLength = clipLengthSeconds - 10;
     const maxLength = clipLengthSeconds + 10;
 
-    const prompt = `あなたはYouTube動画の切り抜き編集のプロフェッショナルです。
-以下のタイムコード付き字幕から、ショート動画として「バズる可能性が高い」切り抜き箇所を抽出してください。
+    // ══════════════════════════════════════════
+    // PHASE 1: Topic Segmentation
+    // Have AI identify ALL distinct topics first
+    // ══════════════════════════════════════════
+    const segmentPrompt = `あなたはYouTube動画のコンテンツ分析の専門家です。
+以下のタイムコード付き字幕を最初から最後まで読み、動画内の「話題・トピック」を全て特定してください。
 
 【タイムコード付き字幕】
 ${correctedSubtitles}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-★★★ 最重要ルール1: 内容ベースで切り抜く ★★★
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+【作業手順】
+1. 字幕を最初から最後まで通して読む
+2. 話題が切り替わるポイントを見つける
+3. 各話題の開始タイムコードと終了タイムコードを記録する
+4. 各話題がどのような内容かを簡潔にまとめる
 
-字幕のタイムコードはあくまで「参考」です。タイムコードの区切りに合わせるのではなく、
-**話の内容・意味の流れに合わせて** 開始・終了ポイントを決めてください。
+【話題の区切り方】
+- 新しい疑問や問いかけが始まる箇所 = 新しい話題の開始
+- 結論が述べられた直後 = その話題の終了
+- 話者が「次に」「さて」「ここからは」等の接続表現を使う箇所 = 話題の切り替わり
+- 具体例の説明が始まる/終わる箇所も切り替わりポイント
 
-【正しいやり方】
-1. まず字幕の内容を通して読み、「ここからここまでが1つの完結した話題だ」という範囲を特定する
-2. その話題が始まるセリフのタイムコードを startTime にする
-3. その話題が完結するセリフのタイムコードを endTime にする
-4. startLineには「その話題の最初のセリフ」、endLineには「その話題の最後のセリフ」を記載する
-
-【間違ったやり方】
-✗ 字幕の最初のタイムコードを機械的にstartTimeにする
-✗ ちょうど良い秒数になるタイムコードを探してendTimeにする
-✗ 話の途中で秒数が合うからといってそこで切る
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-★★★ 最重要ルール2: 尺（クリップの長さ）★★★
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-各クリップは **必ず${clipLengthSeconds}秒前後** にすること。
-
-- 最低: ${minLength}秒
-- 最大: ${maxLength}秒
-- 目標: ${clipLengthSeconds}秒
-
-【尺の計算方法】
-endTimeの秒数 − startTimeの秒数 = クリップの尺
-例: startTime "00:02:00"(120秒) → endTime "00:03:30"(210秒) → 尺 = 90秒 ✓
-例: startTime "00:05:00"(300秒) → endTime "00:05:45"(345秒) → 尺 = 45秒 ✗ ← 短すぎ！
-
-★ 出力前に必ず各クリップの尺を自分で計算し、${minLength}秒〜${maxLength}秒の範囲内であることを確認すること。
-★ 尺が短い場合は、話題の範囲を広げて前後のセリフを含めること。
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-【切り抜きポイントの選定基準】
-
-■ 開始ポイント：
-- その話題・主張が始まる最初のセリフから開始する
-- 前の話題の最後のセリフは含めない
-- 視聴者の興味を引くフック（問いかけ、意外な事実提示）があるとベスト
-
-■ 終了ポイント：
-- その話題の結論・まとめ・オチが言い終わったセリフで終了する
-- 「〜ということです」「〜なんですよね」「〜わけです」のような結論の言葉の後で終わる
-- ★★ 話題の結論が出る前に切るのは絶対禁止 ★★
-- 次の話題の導入セリフは含めない
-
-■ startLine / endLine の書き方：
-- startLine: クリップの最初のセリフ（話題の導入部分）をそのまま記載
-- endLine: クリップの最後のセリフ（話題の結論部分）をそのまま記載
-- 字幕テキストをそのままコピーすること
-
-■ 全体の構成：
-- 1つの切り抜きで1つの完結した話題・主張が含まれること
-- 前後の文脈なしで初見の視聴者が理解できること
-
-【候補数】
-**必ず5〜8件の候補を抽出してください。** 動画全体からバランスよく選んでください。
+【重要: startLineとendLineについて】
+- startLine: その話題の最初の完全な文。文の途中（「なっています」「ですよ」等）から始まらないこと。
+- endLine: その話題の最後の完全な文。文が完結していること（「〜です」「〜ですね」「〜ました」「〜わけです」等で終わる）。
+  文の途中（「〜が」「〜で」「〜SNSで」等）で切れていたら、その次の文末まで含めること。
 
 【出力形式】
-必ず以下のJSON配列のみを出力してください（説明文やMarkdownは不要）。
+JSON配列のみを出力してください。
+\`\`\`json
+[
+  {
+    "topicNumber": 1,
+    "startTime": "00:00:11",
+    "endTime": "00:01:45",
+    "startLine": "この話題の最初の完全なセリフ",
+    "endLine": "この話題の最後の完全なセリフ（文末で終わる）",
+    "topicTitle": "話題のタイトル",
+    "topicSummary": "話の要点を2-3文で"
+  }
+]
+\`\`\``;
+
+    try {
+        const segmentResult = await generateText(segmentPrompt, 0.2);
+
+        // Parse topic segments
+        let topics: {
+            topicNumber: number;
+            startTime: string;
+            endTime: string;
+            startLine: string;
+            endLine: string;
+            topicTitle: string;
+            topicSummary: string;
+        }[] = [];
+
+        try {
+            const jsonMatch = segmentResult.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+                topics = JSON.parse(jsonMatch[0]);
+            }
+        } catch (parseErr) {
+            console.error("Failed to parse topic segments:", parseErr);
+            return { success: true, data: segmentResult };
+        }
+
+        if (!topics || topics.length === 0) {
+            return { success: true, data: "動画内のトピックを特定できませんでした。字幕データを確認してください。" };
+        }
+
+        // ══════════════════════════════════════════
+        // PHASE 2: Select & Adjust Best Clips
+        // From topics, pick the best ones for target duration
+        // ══════════════════════════════════════════
+        const topicsSummary = topics.map(t => {
+            const startSec = timecodeToSeconds(t.startTime) || 0;
+            const endSec = timecodeToSeconds(t.endTime) || 0;
+            const dur = endSec - startSec;
+            return `トピック${t.topicNumber}: ${t.startTime}〜${t.endTime}（${dur}秒）
+  タイトル: ${t.topicTitle}
+  開始セリフ: 「${t.startLine}」
+  終了セリフ: 「${t.endLine}」
+  概要: ${t.topicSummary}`;
+        }).join('\n\n');
+
+        const selectPrompt = `以下は動画の全トピック一覧です。この中から「バズる可能性が高い」切り抜きを5〜8件作成してください。
+
+【トピック一覧】
+${topicsSummary}
+
+【タイムコード付き字幕（参照用）】
+${correctedSubtitles}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+★★★ 尺のルール ★★★
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+各クリップは **${clipLengthSeconds}秒前後** にすること（${minLength}秒〜${maxLength}秒）。
+
+- トピックが短すぎる場合 → 隣接するトピックと結合して1つのクリップにする
+- トピックが長すぎる場合 → そのトピック内の最も面白い部分を${clipLengthSeconds}秒分だけ切り出す
+- 必ず endTimeの秒数 − startTimeの秒数 を計算し、${minLength}〜${maxLength}秒であること
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+★★★ 開始・終了セリフのルール ★★★
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+■ startLine（開始セリフ）:
+- 完全な文であること
+- 前の話の続きではないこと
+- ✗ 悪い例：「なっています　なんと社会保障の」← 前文の続き
+- ✗ 悪い例：「色々と言ってなんと通りました」← 何が通ったか分からない
+- ✓ 良い例：「消費税は何に使われてるのか気になりますよね」← 独立した問いかけ
+- ✓ 良い例：「実は消費税を上げると内閣が潰れるというジンクスがあるんです」← 独立した主張
+
+■ endLine（終了セリフ）:
+- 文が完結していること
+- 話の結論・オチが含まれていること
+- ✗ 悪い例：「何に使われているのかというのが最近SNSで」← 文が途中で切れている
+- ✗ 悪い例：「確認が取れないようになってる　これが正解なのです　なので高市さんは嘘をついて」← 「嘘をついて」の後が続く
+- ✓ 良い例：「本当に社会保障に使われているのかは確認できないのです」← 文が完結
+- ✓ 良い例：「だから消費税は鬼門中の鬼門なんですね」← 結論で終わっている
+
+【出力形式】
+JSON配列のみ。
 \`\`\`json
 [
   {
     "startTime": "00:02:00",
     "endTime": "00:03:30",
     "durationSec": 90,
-    "startLine": "この話題の最初のセリフ",
-    "endLine": "この話題の結論のセリフ",
-    "theme": "テーマ見出し（バズりやすいタイトル風に）",
-    "summary": "内容の要約"
+    "startLine": "クリップ開始の完全な文（字幕からそのままコピー）",
+    "endLine": "クリップ終了の完全な文（字幕からそのままコピー・結論で終わる）",
+    "theme": "バズりやすいタイトル",
+    "summary": "この切り抜きの内容要約",
+    "keyPoints": ["クリップ内の重要セリフ1", "重要セリフ2", "結論のセリフ（=endLine）"]
   }
 ]
 \`\`\`
 
-★ durationSecは自分で計算した値を入れること（endTimeの総秒数 − startTimeの総秒数）
-★ ${minLength}秒未満のクリップは出力禁止。話題の範囲を広げて調整すること。
-候補がない場合は空配列 [] を返してください。`;
+★ keyPointsの最後の要素は必ずendLineと一致すること（結論が含まれている確認のため）
+★ durationSec = endTimeの総秒数 − startTimeの総秒数`;
 
-    try {
-        const result = await generateText(prompt, 0.3);
+        const selectResult = await generateText(selectPrompt, 0.3);
 
-        // Parse JSON from AI response
+        // Parse selected clips
         let candidates: ClipCandidate[] = [];
         try {
-            const jsonMatch = result.match(/\[[\s\S]*\]/);
+            const jsonMatch = selectResult.match(/\[[\s\S]*\]/);
             if (jsonMatch) {
                 candidates = JSON.parse(jsonMatch[0]);
             }
         } catch (parseErr) {
-            console.error("Failed to parse clip candidates JSON:", parseErr);
-            return { success: true, data: result };
+            console.error("Failed to parse clip candidates:", parseErr);
+            return { success: true, data: selectResult };
         }
 
         if (!candidates || candidates.length === 0) {
             return { success: true, data: "条件に合致する切り抜き箇所は見つかりませんでした。" };
         }
 
-        // Compute actual duration from timecodes and accept all valid clips
+        // Compute actual durations and build output
         const processedCandidates: (ClipCandidate & { durationSec: number; durationWarning?: string })[] = [];
 
         for (const c of candidates) {
             const startSec = timecodeToSeconds(c.startTime);
             const endSec = timecodeToSeconds(c.endTime);
-
             if (startSec === null || endSec === null) continue;
 
             const actualDuration = endSec - startSec;
@@ -201,15 +244,11 @@ endTimeの秒数 − startTimeの秒数 = クリップの尺
                 durationWarning = `ℹ️ 指定尺より長め`;
             }
 
-            processedCandidates.push({
-                ...c,
-                durationSec: actualDuration,
-                durationWarning,
-            });
+            processedCandidates.push({ ...c, durationSec: actualDuration, durationWarning });
         }
 
         if (processedCandidates.length === 0) {
-            return { success: true, data: "タイムコードが正しい切り抜き候補が見つかりませんでした。字幕データを確認してください。" };
+            return { success: true, data: "タイムコードが正しい切り抜き候補が見つかりませんでした。" };
         }
 
         // Sort by startTime
@@ -219,7 +258,7 @@ endTimeの秒数 − startTimeの秒数 = クリップの尺
             return aStart - bStart;
         });
 
-        // Build Markdown output
+        // Build Markdown
         let markdown = `**${processedCandidates.length} 件の切り抜き候補** が見つかりました（指定尺: ${clipLengthSeconds}秒前後）\n\n`;
         markdown += `---\n\n`;
 
@@ -231,7 +270,14 @@ endTimeの秒数 − startTimeの秒数 = クリップの尺
             markdown += `- **開始セリフ**: 「${c.startLine}」\n`;
             markdown += `- **終了セリフ**: 「${c.endLine}」\n`;
             markdown += `- **テーマ**: ${c.theme}\n`;
-            markdown += `- **内容要約**: ${c.summary}\n\n`;
+            markdown += `- **内容要約**: ${c.summary}\n`;
+            if (c.keyPoints && c.keyPoints.length > 0) {
+                markdown += `- **主要ポイント**:\n`;
+                c.keyPoints.forEach(kp => {
+                    markdown += `  - 「${kp}」\n`;
+                });
+            }
+            markdown += `\n`;
         });
 
         return { success: true, data: markdown };
