@@ -31,9 +31,12 @@ export function extractEditableText(content: any): ContentInfo {
       return { text: content.content, contentType: 'html', isEditable: true, contentPath: 'content' };
     }
 
-    // Video clip candidates → view only
+    // Video clip candidates → markdown text, editable
     if (content.clipCandidates) {
-      return { text: JSON.stringify(content, null, 2), contentType: 'text', isEditable: false, contentPath: 'root' };
+      const text = typeof content.clipCandidates === 'string'
+        ? content.clipCandidates
+        : JSON.stringify(content.clipCandidates, null, 2);
+      return { text, contentType: 'text', isEditable: true, contentPath: 'clipCandidates' };
     }
 
     // Array of images → view only
@@ -67,6 +70,10 @@ export function patchContent(original: any, newText: string, contentPath: string
 
   if (contentPath === 'content') {
     return { ...original, content: newText };
+  }
+
+  if (contentPath === 'clipCandidates') {
+    return { ...original, clipCandidates: newText };
   }
 
   return newText;
