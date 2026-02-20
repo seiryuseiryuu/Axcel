@@ -162,8 +162,11 @@ ${JSON.stringify(analysisData, null, 2)}
     try {
         const { generateText } = await import("@/lib/gemini");
         const textResult = await generateText(prompt, 0.7, "gemini-2.0-flash");
-        const cleanJson = textResult.replace(/```json/g, "").replace(/```/g, "").trim();
-        return { success: true, data: JSON.parse(cleanJson) };
+        const jsonMatch = textResult.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            return { success: false, error: "AIからJSON形式の応答を取得できませんでした。再度お試しください。" };
+        }
+        return { success: true, data: JSON.parse(jsonMatch[0]) };
     } catch (e: any) {
         return { success: false, error: e.message || "プロンプト生成エラー" };
     }
