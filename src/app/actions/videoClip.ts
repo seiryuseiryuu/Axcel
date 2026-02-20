@@ -114,8 +114,9 @@ ${correctedSubtitles}
 1. 1つのセリフだけでは短すぎる場合、前後の複数のセリフを結合して1つのクリップにする。
 2. 必ず開始〜終了の間に十分なセリフ量が含まれるよう、広い範囲を取ること。
 3. 字幕冒頭のタイトルや説明文はセリフではないので無視すること。
-4. **短いクリップ（${minLength}秒未満）は出力しないでください。** 必ず複数のセリフを結合して ${minLength}秒以上にすること。
+4. **各クリップは必ず${clipLengthSeconds}秒前後にすること（最低${minLength}秒）。** 短すぎるクリップは絶対に出さないこと。
 5. 各候補は重複しないこと（同じ時間帯を含まない）。
+6. **endLine（終了セリフ）は必ず文が完結しているセリフにすること。** 文の途中で切れているセリフを endLine にしてはいけない。
 
 【出力形式】
 必ず以下のJSON配列のみを出力してください。説明文やMarkdownは不要です。
@@ -153,8 +154,9 @@ ${correctedSubtitles}
             return { success: true, data: "条件に合致する切り抜き箇所は見つかりませんでした。" };
         }
 
-        // PHASE 3: Programmatic duration validation — try to extend short clips rather than simply rejecting
+        // PHASE 3: Programmatic duration validation
         const validCandidates: (ClipCandidate & { durationSec: number })[] = [];
+        const shortCandidates: ClipCandidate[] = [];
         const rejectedCount = { short: 0, invalid: 0 };
 
         for (const c of candidates) {
@@ -166,60 +168,96 @@ ${correctedSubtitles}
                 continue;
             }
 
-            let durationSec = endSec - startSec;
+            const durationSec = endSec - startSec;
 
             if (durationSec < minLength) {
-                // Try to extend clip: add time to the end to reach minimum length
-                const extendedEndSec = startSec + minLength + 5; // Extend to minLength + 5s buffer
-                const extendedEndTime = secondsToTimecode(extendedEndSec);
-                durationSec = extendedEndSec - startSec;
-                validCandidates.push({
-                    ...c,
-                    endTime: extendedEndTime,
-                    endLine: c.endLine + "（自動延長）",
-                    durationSec
-                });
+                // Don't blindly extend — collect for AI re-extension
+                shortCandidates.push(c);
+                rejectedCount.short++;
                 continue;
             }
 
-            // Accept
             validCandidates.push({ ...c, durationSec });
         }
 
-        // PHASE 3.5: If too few valid candidates, do a retry with relaxed constraints
-        if (validCandidates.length < 3 && candidates.length > 0) {
-            console.log(`[VideoClip] Only ${validCandidates.length} valid candidates. Retrying with relaxed constraints...`);
+        // PHASE 3.5: AI-driven re-extension for short clips
+        // Instead of mechanically adding seconds, ask the AI to find proper ending points
+        if (shortCandidates.length > 0) {
+            console.log(`[VideoClip] ${shortCandidates.length} short clips found. Asking AI to find proper endpoints...`);
+
+            const shortClipsList = shortCandidates.map((c, i) =>
+                `${i + 1}. 開始: ${c.startTime}「${c.startLine}」→ 終了: ${c.endTime}「${c.endLine}」テーマ: ${c.theme}`
+            ).join('\n');
+
+            const reExtendPrompt = `以下の切り抜き候補は尺が短すぎます（${minLength}秒未満）。
+各候補の開始タイムコードはそのまま維持し、**終了タイムコードを延長**して${minLength}〜${maxLength}秒になるようにしてください。
+
+【重要ルール】
+- 終了ポイントは必ず「話の区切りが良い所」で設定する
+- 文の途中で切らない。必ず文末（「〜です」「〜ですね」「〜ですよ」「〜ました」等）で終わる
+- 話題が完結する箇所、または次の話題に移る直前で終わる
+- 字幕データを参照して、実際にそのタイムコードにあるセリフを endLine に記載する
+
+【尺の短い候補一覧】
+${shortClipsList}
+
+【タイムコード付き字幕（参照用）】
+${correctedSubtitles}
+
+【出力形式】
+JSON配列のみ。startTimeは変更しないこと。endTimeとendLineを適切に更新すること。
+\`\`\`json
+[
+  {
+    "startTime": "元のstartTime",
+    "endTime": "延長後のendTime",
+    "startLine": "元のstartLine",
+    "endLine": "延長後の終了セリフ（実際の字幕テキスト）",
+    "theme": "元のtheme",
+    "summary": "元のsummary"
+  }
+]
+\`\`\``;
+
+            try {
+                const reExtendResult = await generateText(reExtendPrompt, 0.2);
+                const reExtendMatch = reExtendResult.match(/\[[\s\S]*\]/);
+                if (reExtendMatch) {
+                    const reExtended: ClipCandidate[] = JSON.parse(reExtendMatch[0]);
+                    for (const c of reExtended) {
+                        const startSec = timecodeToSeconds(c.startTime);
+                        const endSec = timecodeToSeconds(c.endTime);
+                        if (startSec === null || endSec === null) continue;
+                        const durationSec = endSec - startSec;
+                        if (durationSec >= minLength - 5) { // Slightly relaxed to accept AI's judgement
+                            validCandidates.push({ ...c, durationSec });
+                        }
+                    }
+                }
+            } catch (reExtendErr) {
+                console.warn("[VideoClip] AI re-extension failed:", reExtendErr);
+            }
+        }
+
+        // PHASE 3.75: If still too few valid candidates, retry from scratch with relaxed constraints
+        if (validCandidates.length < 3) {
+            console.log(`[VideoClip] Only ${validCandidates.length} valid candidates after re-extension. Retrying...`);
             const relaxedMinLength = Math.max(20, minLength - 15);
-            const retryPrompt = `前回の分析で切り抜き候補が少なすぎました。追加の候補を見つけてください。
+            const retryPrompt = `切り抜き候補が不足しています。追加の候補を見つけてください。
 
 【タイムコード付き字幕】
 ${correctedSubtitles}
 
-【緩和された条件】
-- 最低尺: ${relaxedMinLength}秒以上
-- 最大尺: ${maxLength + 15}秒まで許容
-- 少し短めでも、インパクトのある内容ならOK
-- 前回見つけた時間帯以外から探す: ${validCandidates.map(c => `${c.startTime}〜${c.endTime}`).join(', ')}
-
-【重要】
-- 話の区切りの良い所で切ること（途中で切れない）
-- 視聴者が文脈なしで理解できること
-- **必ず3〜5件の追加候補を出すこと**
+【条件】
+- 最低尺: ${relaxedMinLength}秒以上、最大尺: ${maxLength + 15}秒まで許容
+- **話が完結している区切りの良い箇所で開始・終了すること**
+- 文の途中で切らない。終了セリフは必ず文末で終わること。
+- 前後の文脈なしで視聴者が理解できること
+- 既存候補の時間帯を避ける: ${validCandidates.map(c => `${c.startTime}〜${c.endTime}`).join(', ') || 'なし'}
+- **必ず3〜5件の候補を出すこと**
 
 【出力形式】
-JSON配列のみ。前回と同じフォーマット。
-\`\`\`json
-[
-  {
-    "startTime": "MM:SS",
-    "endTime": "MM:SS",
-    "startLine": "開始セリフ",
-    "endLine": "終了セリフ",
-    "theme": "テーマ",
-    "summary": "要約"
-  }
-]
-\`\`\``;
+JSON配列のみ（前回と同じフォーマット）。`;
 
             try {
                 const retryResult = await generateText(retryPrompt, 0.4);
@@ -262,7 +300,7 @@ JSON配列のみ。前回と同じフォーマット。
         // Build Markdown output
         let markdown = `**${validCandidates.length} 件の切り抜き候補** が見つかりました（指定尺: ${clipLengthSeconds}秒 ± 10秒）\n\n`;
         if (rejectedCount.short > 0) {
-            markdown += `> ℹ️ ${rejectedCount.short} 件の短い候補は自動延長されました。\n\n`;
+            markdown += `> ℹ️ ${rejectedCount.short} 件の短い候補はAIが適切な終了ポイントを再検索しました。\n\n`;
         }
         markdown += `---\n\n`;
 
